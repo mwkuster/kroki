@@ -3,39 +3,48 @@
 module Api
   ( User(..)
   , getUser
+
   , Summary(..)
   , ReviewBucket(..)
   , getSummary
   , reviewsAvailableNow
   , nextReviewBucket
   , reviewsPerHourNext24
+
   , Assignment(..)
   , getAvailableAssignments
+
+  , SubjectType(..)
+  , Subject(..)
+  , getSubjectsByIds
   ) where
 
 import Control.Exception (Exception)
-import Data.Aeson (FromJSON(..), (.:), withObject)
+import Data.Aeson (FromJSON(..), (.:), (.:?), Object, withObject)
+import Data.Aeson.Types (Parser)
+import qualified Data.Aeson.Key as Key
+import Data.Char (isSpace)
+import Data.List (sortOn)
+import Data.Maybe (catMaybes)
+import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Time (UTCTime(..), addUTCTime)
 import Data.Time.Format.ISO8601 (iso8601ParseM)
 
 import qualified Data.ByteString.Char8 as BS8
-import Data.List (sortOn)
-import Data.Text (Text)
-import qualified Data.Text as T
-
 import Network.HTTP.Req
 
--- A small "domain" type used by Main.hs
+--------------------------------------------------------------------------------
+-- User
+--------------------------------------------------------------------------------
+
 data User = User
   { userUsername   :: String
   , userLevel      :: Int
   , userProfileUrl :: String
   } deriving (Show, Eq)
 
--- WaniKani wraps the actual record in a top-level "data" field.
-newtype UserEnvelope = UserEnvelope
-  { ueData :: UserData
-  } deriving (Show)
+newtype UserEnvelope = UserEnvelope { ueData :: UserData } deriving (Show)
 
 data UserData = UserData
   { udUsername   :: Text
@@ -54,42 +63,12 @@ instance FromJSON UserData where
       <*> o .: "level"
       <*> o .: "profile_url"
 
--- Summary endpoint types
-data Summary = Summary
-  { summaryReviews :: [ReviewBucket]
-  } deriving (Show, Eq)
-
-data ReviewBucket = ReviewBucket
-  { rbAvailableAt :: UTCTime
-  , rbSubjectIds  :: [Int]
-  } deriving (Show, Eq)
-
-newtype SummaryEnvelope = SummaryEnvelope
-  { seData :: Summary
-  } deriving (Show)
-
-instance FromJSON SummaryEnvelope where
-  parseJSON = withObject "SummaryEnvelope" $ \o ->
-    SummaryEnvelope <$> o .: "data"
-
-instance FromJSON Summary where
-  parseJSON = withObject "Summary" $ \o ->
-    Summary <$> o .: "reviews"
-
-instance FromJSON ReviewBucket where
-  parseJSON = withObject "ReviewBucket" $ \o -> do
-    -- available_at is an ISO8601 timestamp string in the API
-    t <- o .: "available_at"
-    at <- maybe (fail "invalid available_at") pure (iso8601ParseM t)
-    ReviewBucket at <$> o .: "subject_ids"
-
 data KrokiError
   = ApiDecodeError Text
   deriving (Show)
 
 instance Exception KrokiError
 
--- API calls
 getUser :: String -> IO User
 getUser token = runReq defaultHttpConfig $ do
   let authHeader = header "Authorization" ("Bearer " <> BS8.pack token)
@@ -111,6 +90,35 @@ getUser token = runReq defaultHttpConfig $ do
     , userProfileUrl = T.unpack (udProfileUrl u)
     }
 
+--------------------------------------------------------------------------------
+-- Summary (reviews timeline)
+--------------------------------------------------------------------------------
+
+data Summary = Summary
+  { summaryReviews :: [ReviewBucket]
+  } deriving (Show, Eq)
+
+data ReviewBucket = ReviewBucket
+  { rbAvailableAt :: UTCTime
+  , rbSubjectIds  :: [Int]
+  } deriving (Show, Eq)
+
+newtype SummaryEnvelope = SummaryEnvelope { seData :: Summary } deriving (Show)
+
+instance FromJSON SummaryEnvelope where
+  parseJSON = withObject "SummaryEnvelope" $ \o ->
+    SummaryEnvelope <$> o .: "data"
+
+instance FromJSON Summary where
+  parseJSON = withObject "Summary" $ \o ->
+    Summary <$> o .: "reviews"
+
+instance FromJSON ReviewBucket where
+  parseJSON = withObject "ReviewBucket" $ \o -> do
+    t <- o .: "available_at"
+    at <- maybe (fail "invalid available_at") pure (iso8601ParseM t)
+    ReviewBucket at <$> o .: "subject_ids"
+
 getSummary :: String -> IO Summary
 getSummary token = runReq defaultHttpConfig $ do
   let authHeader = header "Authorization" ("Bearer " <> BS8.pack token)
@@ -126,7 +134,6 @@ getSummary token = runReq defaultHttpConfig $ do
   let env = responseBody resp :: SummaryEnvelope
   pure (seData env)
 
--- Review helpers
 reviewsAvailableNow :: UTCTime -> Summary -> Int
 reviewsAvailableNow now s =
   sum [ length (rbSubjectIds b)
@@ -144,10 +151,6 @@ nextReviewBucket now s =
     (b:_) -> Just (rbAvailableAt b, length (rbSubjectIds b))
     []    -> Nothing
 
--- Projection semantics:
--- Row 0 (timestamp = now): new == open == number currently available.
--- Rows 1..23: for each next hour window, "new" is what becomes available
--- in that hour; "open" is cumulative from now (assuming you do no reviews).
 openAt :: UTCTime -> Summary -> Int
 openAt t s =
   sum [ length (rbSubjectIds b)
@@ -163,6 +166,7 @@ newInWindow start end s =
       , rbAvailableAt b <= end
       ]
 
+-- Row 0: (now, openNow, openNow). Rows 1..: per hour new + cumulative open from now.
 reviewsPerHourNext24 :: UTCTime -> Summary -> [(UTCTime, Int, Int)]
 reviewsPerHourNext24 now s =
   let openNow = openAt now s
@@ -183,14 +187,16 @@ reviewsPerHourNext24 now s =
 
   in map mk ([0..23] :: [Int])
 
+--------------------------------------------------------------------------------
+-- Assignments (to get what's available now)
+--------------------------------------------------------------------------------
+
 data Assignment = Assignment
   { asId        :: Int
   , asSubjectId :: Int
   } deriving (Show, Eq)
 
-newtype AssignmentsEnvelope = AssignmentsEnvelope
-  { aeData :: [AssignmentData]
-  } deriving (Show)
+newtype AssignmentsEnvelope = AssignmentsEnvelope { aeData :: [AssignmentData] } deriving (Show)
 
 data AssignmentData = AssignmentData
   { adId      :: Int
@@ -216,7 +222,6 @@ getAvailableAssignments token n = runReq defaultHttpConfig $ do
   let authHeader = header "Authorization" ("Bearer " <> BS8.pack token)
       revHeader  = header "Wanikani-Revision" "20170710"
 
-  -- available=true gives assignments currently available for review
   resp <- req
     GET
     (https "api.wanikani.com" /: "v2" /: "assignments")
@@ -228,3 +233,103 @@ getAvailableAssignments token n = runReq defaultHttpConfig $ do
   let env = responseBody resp :: AssignmentsEnvelope
       as  = map toAssignment (aeData env)
   pure (take n as)
+
+--------------------------------------------------------------------------------
+-- Subjects (to show prompts + accepted answers)
+--------------------------------------------------------------------------------
+
+data SubjectType = Radical | Kanji | Vocabulary | KanaVocabulary
+  deriving (Show, Eq)
+
+data Subject = Subject
+  { subjId       :: Int
+  , subjType     :: SubjectType
+  , subjChars    :: Maybe Text
+  , subjMeanings :: [Text]   -- accepted meanings
+  , subjReadings :: [Text]   -- accepted readings (kana/romaji depending on type)
+  } deriving (Show, Eq)
+
+newtype SubjectsEnvelope = SubjectsEnvelope { suData :: [Subject] } deriving (Show)
+
+instance FromJSON SubjectsEnvelope where
+  parseJSON = withObject "SubjectsEnvelope" $ \o ->
+    SubjectsEnvelope <$> o .: "data"
+
+instance FromJSON Subject where
+  parseJSON = withObject "Subject" $ \o -> do
+    sid <- o .: "id"
+    obj <- o .: "object"
+    st  <- parseSubjectType obj
+    d   <- o .: "data"
+
+    chars <- d .:? "characters"
+
+    meanings <- d .: "meanings" >>= parseAccepted "meaning"
+    readings <- case st of
+      Radical        -> pure []
+      _              -> (d .:? "readings" >>= maybe (pure []) (parseAccepted "reading"))
+
+    pure Subject
+      { subjId       = sid
+      , subjType     = st
+      , subjChars    = chars
+      , subjMeanings = meanings
+      , subjReadings = readings
+      }
+
+parseSubjectType :: Text -> Parser SubjectType
+parseSubjectType t =
+  case t of
+    "radical"         -> pure Radical
+    "kanji"           -> pure Kanji
+    "vocabulary"      -> pure Vocabulary
+    "kana_vocabulary" -> pure KanaVocabulary
+    _                 -> fail ("Unknown subject type: " <> T.unpack t)
+
+-- Parse accepted answers from a list of objects like:
+-- { "meaning": "...", "accepted_answer": true, ... }
+parseAccepted :: Text -> [AesonObj] -> Parser [Text]
+parseAccepted field xs =
+  fmap catMaybes $ mapM (acceptedFrom field) xs
+
+type AesonObj = Data.Aeson.Object
+
+acceptedFrom :: Text -> AesonObj -> Parser (Maybe Text)
+acceptedFrom field o = do
+  acc <- o .: "accepted_answer"
+  if acc
+    then Just <$> o .: Key.fromText field
+    else pure Nothing
+
+
+-- Fetch subjects by IDs; chunk to avoid huge URLs.
+getSubjectsByIds :: String -> [Int] -> IO [Subject]
+getSubjectsByIds token ids = do
+  let chunks = chunkN 100 ids
+  fmap concat $ mapM (getChunk token) chunks
+
+getChunk :: String -> [Int] -> IO [Subject]
+getChunk token idsChunk = runReq defaultHttpConfig $ do
+  let authHeader = header "Authorization" ("Bearer " <> BS8.pack token)
+      revHeader  = header "Wanikani-Revision" "20170710"
+      idsParam   = T.intercalate "," (map (T.pack . show) idsChunk)
+
+  resp <- req
+    GET
+    (https "api.wanikani.com" /: "v2" /: "subjects")
+    NoReqBody
+    jsonResponse
+    ( "ids" =: idsParam
+   <> authHeader <> revHeader )
+
+  let env = responseBody resp :: SubjectsEnvelope
+  pure (suData env)
+
+chunkN :: Int -> [a] -> [[a]]
+chunkN n0 = go
+  where
+    n = max 1 n0
+    go [] = []
+    go xs =
+      let (a, b) = splitAt n xs
+      in a : go b
