@@ -11,6 +11,8 @@ import System.Exit (die)
 import Data.Time (getCurrentTime, getCurrentTimeZone, utcToLocalTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 
+import Data.Maybe (fromMaybe)
+
 main :: IO ()
 main = do
   opts <- Cli.parseCli
@@ -27,6 +29,11 @@ main = do
         (die "Missing API token. Provide --token, set WANIKANI_API_TOKEN, or put token=... into ~/.config/kroki/config")
         pure
         token
+
+  let batchSize =
+        Cli.optBatchSize opts
+        <|> Config.cfgBatchSize cfg
+        <|> Just 10
 
   case Cli.optCommand opts of
     Cli.WhoAmI -> do
@@ -54,6 +61,13 @@ main = do
                    <> padLeft 3 (show newN) <> "  "
                    <> padLeft 4 (show openN)))
            rows
+
+    Cli.Study -> do
+      now <- getCurrentTime
+      let n = fromMaybe 10 batchSize
+      as <- Api.getAvailableAssignments t n
+      putStrLn ("Batch size: " <> show (length as) <> " (max " <> show n <> ")")
+      mapM_ (putStrLn . ("Subject: " <>) . show . Api.asSubjectId) as
 
 padLeft :: Int -> String -> String
 padLeft n s = replicate (max 0 (n - length s)) ' ' <> s

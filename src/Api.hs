@@ -9,6 +9,8 @@ module Api
   , reviewsAvailableNow
   , nextReviewBucket
   , reviewsPerHourNext24
+  , Assignment(..)
+  , getAvailableAssignments
   ) where
 
 import Control.Exception (Exception)
@@ -180,3 +182,49 @@ reviewsPerHourNext24 now s =
         in (start, newN, openN)
 
   in map mk ([0..23] :: [Int])
+
+data Assignment = Assignment
+  { asId        :: Int
+  , asSubjectId :: Int
+  } deriving (Show, Eq)
+
+newtype AssignmentsEnvelope = AssignmentsEnvelope
+  { aeData :: [AssignmentData]
+  } deriving (Show)
+
+data AssignmentData = AssignmentData
+  { adId      :: Int
+  , adSubject :: Int
+  } deriving (Show)
+
+instance FromJSON AssignmentsEnvelope where
+  parseJSON = withObject "AssignmentsEnvelope" $ \o ->
+    AssignmentsEnvelope <$> o .: "data"
+
+instance FromJSON AssignmentData where
+  parseJSON = withObject "AssignmentData" $ \o -> do
+    i <- o .: "id"
+    d <- o .: "data"
+    s <- d .: "subject_id"
+    pure (AssignmentData i s)
+
+toAssignment :: AssignmentData -> Assignment
+toAssignment (AssignmentData i s) = Assignment i s
+
+getAvailableAssignments :: String -> Int -> IO [Assignment]
+getAvailableAssignments token n = runReq defaultHttpConfig $ do
+  let authHeader = header "Authorization" ("Bearer " <> BS8.pack token)
+      revHeader  = header "Wanikani-Revision" "20170710"
+
+  -- available=true gives assignments currently available for review
+  resp <- req
+    GET
+    (https "api.wanikani.com" /: "v2" /: "assignments")
+    NoReqBody
+    jsonResponse
+    ( "available" =: True
+   <> authHeader <> revHeader )
+
+  let env = responseBody resp :: AssignmentsEnvelope
+      as  = map toAssignment (aeData env)
+  pure (take n as)

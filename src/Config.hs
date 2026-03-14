@@ -13,6 +13,7 @@ import System.FilePath ((</>))
 
 data KrokiConfig = KrokiConfig
   { cfgToken :: Maybe String
+  , cfgBatchSize :: Maybe Int
   } deriving (Show, Eq)
 
 -- Loads ~/.config/kroki/config (via XDG)
@@ -27,6 +28,7 @@ parseConfig :: String -> KrokiConfig
 parseConfig s =
   KrokiConfig
     { cfgToken = lookupKey "token" (lines s)
+    , cfgBatchSize = lookupInt "batch_size" (lines s)
     }
 
 lookupKey :: String -> [String] -> Maybe String
@@ -45,3 +47,11 @@ lookupKey key ls =
 
 trim :: String -> String
 trim = dropWhile isSpace . reverse . dropWhile isSpace . reverse
+
+lookupInt :: String -> [String] -> Maybe Int
+lookupInt key ls =
+  case lookupKey key ls of
+    Just v  -> case reads v of
+                 [(n, "")] -> Just n
+                 _         -> Nothing
+    Nothing -> Nothing

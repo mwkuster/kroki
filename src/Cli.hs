@@ -9,10 +9,12 @@ import Options.Applicative
 data Command
   = WhoAmI
   | Reviews
+  | Study
   deriving (Show, Eq)
 
 data Options = Options
   { optToken   :: Maybe String
+  , optBatchSize :: Maybe Int
   , optCommand :: Command
   } deriving (Show, Eq)
 
@@ -31,6 +33,7 @@ optionsParser :: Parser Options
 optionsParser =
   Options
     <$> optional tokenOption
+    <*> optional batchSizeOption
     <*> commandParser
 
 tokenOption :: Parser String
@@ -40,6 +43,13 @@ tokenOption =
    <> metavar "TOKEN"
    <> help "WaniKani API token (otherwise read WANIKANI_API_TOKEN)" )
 
+batchSizeOption :: Parser Int
+batchSizeOption =
+  option auto
+    ( long "batch-size"
+   <> metavar "N"
+   <> help "Max reviews to include in a study batch (overrides config batch_size)" )
+
 commandParser :: Parser Command
 commandParser =
   hsubparser $
@@ -47,3 +57,5 @@ commandParser =
          (info (pure WhoAmI) (progDesc "Show current WaniKani user"))
     <> command "reviews"
          (info (pure Reviews) (progDesc "Show number of reviews available now"))
+    <> command "study"
+         (info (pure Study) (progDesc "Start a review batch (max N items)"))
