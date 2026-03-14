@@ -8,6 +8,8 @@ import Control.Applicative ((<|>))
 import System.Environment (lookupEnv)
 import System.Exit (die)
 
+import Data.Time (getCurrentTime)
+
 main :: IO ()
 main = do
   opts <- Cli.parseCli
@@ -31,3 +33,11 @@ main = do
       putStrLn ("Username: " <> Api.userUsername user)
       putStrLn ("Level:    " <> show (Api.userLevel user))
       putStrLn ("Profile:  " <> Api.userProfileUrl user)
+    Cli.Reviews -> do
+      now <- getCurrentTime
+      summary <- Api.getSummary t
+      let n = Api.reviewsAvailableNow now summary
+      putStrLn ("Reviews available now: " <> show n)
+      case Api.nextReviewBucket now summary of
+        Just (at, cnt) -> putStrLn ("Next reviews: " <> show cnt <> " at " <> show at)
+        Nothing        -> putStrLn "No upcoming reviews found."

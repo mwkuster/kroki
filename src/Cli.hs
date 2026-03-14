@@ -8,6 +8,7 @@ import Options.Applicative
 
 data Command
   = WhoAmI
+  | Reviews
   deriving (Show, Eq)
 
 data Options = Options
@@ -44,3 +45,5 @@ commandParser =
   hsubparser $
        command "whoami"
          (info (pure WhoAmI) (progDesc "Show current WaniKani user"))
+    <> command "reviews"
+         (info (pure Reviews) (progDesc "Show number of reviews available now"))
