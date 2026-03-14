@@ -5,7 +5,7 @@ module Api
   , getUser
   ) where
 
-import Control.Exception (Exception, throwIO)
+import Control.Exception (Exception)
 import Data.Aeson (FromJSON(..), (.:), withObject)
 -- import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Char8 as BS8
