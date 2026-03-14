@@ -8,7 +8,8 @@ import Control.Applicative ((<|>))
 import System.Environment (lookupEnv)
 import System.Exit (die)
 
-import Data.Time (getCurrentTime)
+import Data.Time (getCurrentTime, getCurrentTimeZone, utcToLocalTime)
+import Data.Time.Format (defaultTimeLocale, formatTime)
 
 main :: IO ()
 main = do
@@ -33,11 +34,29 @@ main = do
       putStrLn ("Username: " <> Api.userUsername user)
       putStrLn ("Level:    " <> show (Api.userLevel user))
       putStrLn ("Profile:  " <> Api.userProfileUrl user)
+
+
     Cli.Reviews -> do
       now <- getCurrentTime
+      tz  <- getCurrentTimeZone
       summary <- Api.getSummary t
-      let n = Api.reviewsAvailableNow now summary
-      putStrLn ("Reviews available now: " <> show n)
-      case Api.nextReviewBucket now summary of
-        Just (at, cnt) -> putStrLn ("Next reviews: " <> show cnt <> " at " <> show at)
-        Nothing        -> putStrLn "No upcoming reviews found."
+
+      putStrLn "Hour (local)           New  Open"
+      putStrLn "---------------------------------"
+
+      let rows = Api.reviewsPerHourNext24 now summary
+          fmtHour utc =
+            let lt = utcToLocalTime tz utc
+            in formatTime defaultTimeLocale "%F %H:00" lt
+
+      mapM_ (\(hStart, newN, openN) ->
+            putStrLn (padRight 20 (fmtHour hStart) <> "  "
+                   <> padLeft 3 (show newN) <> "  "
+                   <> padLeft 4 (show openN)))
+           rows
+
+padLeft :: Int -> String -> String
+padLeft n s = replicate (max 0 (n - length s)) ' ' <> s
+
+padRight :: Int -> String -> String
+padRight n s = s <> replicate (max 0 (n - length s)) ' '
