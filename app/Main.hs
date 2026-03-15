@@ -92,7 +92,9 @@ main = do
           subs <- runStudySession rqAfter subjToAsg subjects
 
           -- (optional) print summary, and if you added --submit, commit here
-          putStrLn ("Completed (fully correct) items to submit: " <> show (length subs))
+          putStrLn ("Items to submit: " <> show (length subs))
+          let withMistakes = length [ () | s <- subs, subWrongMeaning s > 0 || subWrongReading s > 0 ]
+          putStrLn ("Items with mistakes: " <> show withMistakes)
 
           if Cli.optSubmit opts
             then
@@ -240,7 +242,7 @@ runStudySession rqAfter subjToAsg subjects = do
                 , subWrongMeaning = pMeaningWrong p
                 , subWrongReading = pReadingWrong p
                 }
-            | (sid, p) <- fullyCorrect
+            | (sid, p) <- M.toList prog
             , Just asgId <- [M.lookup sid subjToAsg]
             ]
 
@@ -260,10 +262,6 @@ runStudySession rqAfter subjToAsg subjects = do
         Right False -> do
           let prog' = incWrong (qSubject q) (qKind q) prog
           loop (requeueAfter rqAfter q qs) prog' correct (wrong + 1) overridden
-        Right False -> do
-          -- wrong answer, not overridden, not requeued => count as wrong attempt
-          let prog' = incWrong (qSubject q) (qKind q) prog
-          loop qs prog' correct (wrong + 1) overridden
 
         Left OverrideCorrect -> do
           -- treated as correct, DO NOT increment wrong
