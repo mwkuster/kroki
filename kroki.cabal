@@ -58,7 +58,7 @@ executable kroki
     main-is:          Main.hs
 
     hs-source-dirs:  app, src
-    other-modules: Cli, Api, Config
+    other-modules: Cli, Api, Config, Romaji
     default-language: GHC2021
 
     ghc-options:

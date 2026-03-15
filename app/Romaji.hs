@@ -34,13 +34,17 @@ romajiToHiragana = go . T.toLower . T.filter keep
 -- small っ for doubled consonants: kk, ss, tt, pp, etc.
 -- not for vowels or 'n' (handled separately)
 smallTsu :: Text -> Maybe (Text, Text)
-smallTsu t = do
-  c1 <- T.uncons t >>= (Just . fst)
-  c2 <- T.drop 1 t `T.uncons` >>= (Just . fst)
-  let isConsonant c = c `elem` ("bcdfghjklmnpqrstvwxyz" :: String)
-  if c1 == c2 && isConsonant c1 && c1 /= 'n'
-     then Just ("っ", T.drop 1 t)
-     else Nothing
+smallTsu t =
+  case T.uncons t of
+    Just (c1, rest1) ->
+      case T.uncons rest1 of
+        Just (c2, _) ->
+          let isConsonant c = c `elem` ("bcdfghjklmnpqrstvwxyz" :: String)
+          in if c1 == c2 && isConsonant c1 && c1 /= 'n'
+               then Just ("っ", rest1)   -- drop first of the doubled consonant
+               else Nothing
+        Nothing -> Nothing
+    Nothing -> Nothing
 
 -- Handle 'n' as ん when:
 --  - "n'" explicitly
@@ -51,7 +55,7 @@ parseN t
   | "n'" `T.isPrefixOf` t = Just (T.drop 2 t)
   | "nn" `T.isPrefixOf` t = Just (T.drop 1 t)
   | "n"  `T.isPrefixOf` t =
-      case T.drop 1 t `T.uncons` of
+      case T.uncons (T.drop 1 t) of
         Nothing      -> Just ""          -- trailing n
         Just (c, _)  ->
           if c `elem` ("aiueoy" :: String)

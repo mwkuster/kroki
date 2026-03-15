@@ -18,6 +18,9 @@ import qualified Data.Text as T
 import Data.List (intercalate)
 import Data.Char (toLower, isSpace)
 
+import qualified Romaji
+
+
 main :: IO ()
 main = do
   opts <- Cli.parseCli
@@ -173,7 +176,11 @@ normMeaning = collapseSpaces . T.toCaseFold . T.strip
 
 -- Reading normalization: trim + case-fold (harmless for kana; helps for romaji)
 normReading :: Text -> Text
-normReading = T.toCaseFold . T.strip
+normReading t =
+  let t' = T.strip t
+  in if T.all (\c -> (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '\'') t'
+       then Romaji.romajiToHiragana (T.toCaseFold t')
+       else T.toCaseFold t'
 
 collapseSpaces :: Text -> Text
 collapseSpaces =
