@@ -313,13 +313,21 @@ kindLabel QReading = "reading"
 
 displayItem :: Api.Subject -> String
 displayItem s =
-  case Api.subjChars s of
-    Just c | not (T.null (T.strip c)) -> T.unpack (T.strip c)
-    _ ->
-      let m = case Api.subjMeanings s of
-                (x:_) -> T.unpack x
-                []    -> "?"
-      in show (Api.subjType s) <> ":" <> m <> " (#" <> show (Api.subjId s) <> ")"
+  let tag =
+        case Api.subjType s of
+          Api.Kanji         -> " (Kanji)"
+          Api.Radical       -> " (Radical)"
+          Api.Vocabulary    -> " (Vocab)"
+          Api.KanaVocabulary-> " (Vocab)"
+      core =
+        case Api.subjChars s of
+          Just c | not (T.null (T.strip c)) -> T.unpack (T.strip c)
+          _ ->
+            let m = case Api.subjMeanings s of
+                      (x:_) -> T.unpack x
+                      []    -> "?"
+            in m <> " (#" <> show (Api.subjId s) <> ")"
+  in core <> tag
 
 -- Meaning normalization: case-insensitive, trim, collapse spaces
 normMeaning :: Text -> Text
