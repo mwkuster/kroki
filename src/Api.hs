@@ -29,7 +29,7 @@ import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (UTCTime(..), addUTCTime)
-import Data.Time.Format.ISO8601 (iso8601ParseM)
+import Data.Time.Format.ISO8601 (iso8601ParseM, iso8601Show)
 
 import qualified Data.ByteString.Char8 as BS8
 import Network.HTTP.Req
@@ -217,17 +217,20 @@ instance FromJSON AssignmentData where
 toAssignment :: AssignmentData -> Assignment
 toAssignment (AssignmentData i s) = Assignment i s
 
-getAvailableAssignments :: String -> Int -> IO [Assignment]
-getAvailableAssignments token n = runReq defaultHttpConfig $ do
+getAvailableAssignments :: String -> UTCTime -> Int -> IO [Assignment]
+getAvailableAssignments token now n = runReq defaultHttpConfig $ do
   let authHeader = header "Authorization" ("Bearer " <> BS8.pack token)
       revHeader  = header "Wanikani-Revision" "20170710"
+      nowParam   = T.pack (iso8601Show now)
 
   resp <- req
     GET
     (https "api.wanikani.com" /: "v2" /: "assignments")
     NoReqBody
     jsonResponse
-    ( "available" =: True
+    ( "available_before" =: nowParam
+   <> "in_review"        =: True
+   <> "hidden"           =: False
    <> authHeader <> revHeader )
 
   let env = responseBody resp :: AssignmentsEnvelope

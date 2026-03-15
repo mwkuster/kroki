@@ -69,8 +69,9 @@ main = do
 
     Cli.Study -> do
       let n = fromMaybe 10 batchSize
-
-      as <- Api.getAvailableAssignments t n
+      now <- getCurrentTime
+      as <- Api.getAvailableAssignments t now n
+      putStrLn ("Assignment subject_ids: " <> show (map Api.asSubjectId as))
       if null as
         then putStrLn "No reviews available right now."
         else do
