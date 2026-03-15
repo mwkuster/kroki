@@ -17,12 +17,14 @@ module Api
   , SubjectType(..)
   , Subject(..)
   , getSubjectsByIds
+  , createReview
   ) where
 
 import Control.Exception (Exception)
 import Data.Aeson (FromJSON(..), (.:), (.:?), Object, withObject)
 import Data.Aeson.Types (Parser)
 import qualified Data.Aeson.Key as Key
+import Data.Aeson (object, (.=))
 import Data.Char (isSpace)
 import Data.List (sortOn)
 import Data.Maybe (catMaybes)
@@ -336,3 +338,28 @@ chunkN n0 = go
     go xs =
       let (a, b) = splitAt n xs
       in a : go b
+
+createReview :: String -> Int -> Int -> Int -> UTCTime -> IO ()
+createReview token assignmentId wrongMeaning wrongReading createdAt =
+  runReq defaultHttpConfig $ do
+    let authHeader = header "Authorization" ("Bearer " <> BS8.pack token)
+        revHeader  = header "Wanikani-Revision" "20170710"
+
+        body =
+          object
+            [ "review" .= object
+                [ "assignment_id"             .= assignmentId
+                , "incorrect_meaning_answers" .= wrongMeaning
+                , "incorrect_reading_answers" .= wrongReading
+                , "created_at"                .= iso8601Show createdAt
+                ]
+            ]
+
+    _ <- req
+      POST
+      (https "api.wanikani.com" /: "v2" /: "reviews")
+      (ReqBodyJson body)
+      ignoreResponse
+      (authHeader <> revHeader)
+
+    pure ()

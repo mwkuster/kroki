@@ -80,15 +80,47 @@ main = do
       let n = fromMaybe 10 batchSize
       now <- getCurrentTime
       as <- Api.getAvailableAssignments t now n
-      putStrLn ("Assignment subject_ids: " <> show (map Api.asSubjectId as))
       if null as
         then putStrLn "No reviews available right now."
         else do
           let subjectIds = map Api.asSubjectId as
-          subjects <- Api.getSubjectsByIds t subjectIds
+              subjToAsg  = M.fromList [ (Api.asSubjectId a, Api.asId a) | a <- as ]
 
+          subjects <- Api.getSubjectsByIds t subjectIds
           putStrLn ("Batch: " <> show (length subjects) <> " items (max " <> show n <> ")")
-          runStudySession rqAfter subjects
+
+          subs <- runStudySession rqAfter subjToAsg subjects
+
+          -- (optional) print summary, and if you added --submit, commit here
+          putStrLn ("Completed (fully correct) items to submit: " <> show (length subs))
+
+          if Cli.optSubmit opts
+            then
+               if null subs
+               then putStrLn "Nothing to submit (no fully-correct items)."
+               else do
+                  putStrLn ("Ready to submit " <> show (length subs) <> " reviews to WaniKani. Submit now? [y/N]")
+                  putStr "> "
+                  yn <- getLine
+                  case map toLower (trim yn) of
+                    "y" -> do
+                      ts <- getCurrentTime
+                      mapM_
+                         (\s -> Api.createReview t
+                                 (subAssignmentId s)
+                                 (subWrongMeaning s)
+                                 (subWrongReading s)
+                                 ts)
+                         subs
+                      putStrLn "Submitted."
+
+                      now2 <- getCurrentTime
+                      summary2 <- Api.getSummary t
+                      putStrLn ("Reviews available now (after submit): " <> show (Api.reviewsAvailableNow now2 summary2))
+
+                    _ -> putStrLn "Not submitted."
+          else
+             putStrLn "Tip: run with --submit to commit these results to WaniKani."
 
 
 padLeft :: Int -> String -> String
@@ -111,25 +143,54 @@ data Q = Q
 data WrongAction = OverrideCorrect | BackToQueue
   deriving (Show, Eq)
 
--- Track per subject whether meaning/reading are done correctly.
+data Submission = Submission
+  { subAssignmentId :: Int
+  , subWrongMeaning :: Int
+  , subWrongReading :: Int
+  } deriving (Show, Eq)
+
+-- Track per subject whether meaning/reading are done correctly + wrong counts.
 data Progress = Progress
   { pMeaningOk     :: Bool
   , pReadingNeeded :: Bool
   , pReadingOk     :: Bool
+  , pMeaningWrong  :: Int
+  , pReadingWrong  :: Int
   } deriving (Show, Eq)
 
--- How far to postpone a requeued question.
-requeueAfterK :: Int
-requeueAfterK = 7
+-- Insert the question k positions later (or at end if queue shorter).
+requeueAfter :: Int -> Q -> [Q] -> [Q]
+requeueAfter k q qs =
+  let k' = max 0 k
+      (front, back) = splitAt k' qs
+  in front ++ [q] ++ back
 
-runStudySession :: Int -> [Api.Subject] -> IO ()
-runStudySession rqAfter subjects = do
-  let queue0 = concatMap mkQuestions subjects
-  queue <- shuffle queue0
-  let progress = M.fromList [ (Api.subjId s, initProgress s) | s <- subjects ]
-  loop queue progress 0 0 0
+-- Simple shuffle (Fisher–Yates-ish by repeated random extraction)
+-- Needs: import System.Random (randomRIO)
+shuffle :: [a] -> IO [a]
+shuffle xs = go xs []
   where
-    -- only ask reading if there are accepted readings and it's not a radical
+    go [] acc = pure acc
+    go ys acc = do
+      i <- randomRIO (0, length ys - 1)
+      let (front, a:back) = splitAt i ys
+      go (front ++ back) (a : acc)
+
+-- Study session: returns submissions for fully-correct items.
+-- rqAfter: how far to postpone requeued questions
+-- subjToAsg: map subject_id -> assignment_id
+runStudySession :: Int -> M.Map Int Int -> [Api.Subject] -> IO [Submission]
+runStudySession rqAfter subjToAsg subjects = do
+  let queue0    = concatMap mkQuestions subjects
+  queue <- shuffle queue0
+
+  let progress0 = M.fromList [ (Api.subjId s, initProgress s) | s <- subjects ]
+
+  loop queue progress0 0 0 0
+  where
+    acceptedReadings s =
+      filter (not . T.null . T.strip) (Api.subjReadings s)
+
     mkQuestions s =
       let rs = acceptedReadings s
       in Q s QMeaning
@@ -142,26 +203,52 @@ runStudySession rqAfter subjects = do
       let needsReading =
             Api.subjType s /= Api.Radical
             && not (null (acceptedReadings s))
-      in Progress False needsReading False
+      in Progress False needsReading False 0 0
 
-    acceptedReadings s =
-      filter (not . T.null . T.strip) (Api.subjReadings s)
+    markOk :: Api.Subject -> QKind -> M.Map Int Progress -> M.Map Int Progress
+    markOk subj kind mp =
+      let sid = Api.subjId subj
+      in M.adjust (upd kind) sid mp
+      where
+        upd QMeaning p = p { pMeaningOk = True }
+        upd QReading p = p { pReadingOk = True }
 
-    loop :: [Q] -> M.Map Int Progress -> Int -> Int -> Int -> IO ()
+    incWrong :: Api.Subject -> QKind -> M.Map Int Progress -> M.Map Int Progress
+    incWrong subj kind mp =
+      let sid = Api.subjId subj
+      in M.adjust (upd kind) sid mp
+      where
+        upd QMeaning p = p { pMeaningWrong = pMeaningWrong p + 1 }
+        upd QReading p = p { pReadingWrong = pReadingWrong p + 1 }
+
+    loop :: [Q] -> M.Map Int Progress -> Int -> Int -> Int -> IO [Submission]
     loop [] prog correct wrong overridden = do
       let fullyCorrect =
-            length
-              [ ()
-              | (_, p) <- M.toList prog
-              , pMeaningOk p
-              , (not (pReadingNeeded p) || pReadingOk p)
-              ]
-          totalItems = M.size prog
+            [ (sid, p)
+            | (sid, p) <- M.toList prog
+            , pMeaningOk p
+            , (not (pReadingNeeded p) || pReadingOk p)
+            ]
+
+          totalItems   = M.size prog
+          fullyCorrectN = length fullyCorrect
+
+          submissions =
+            [ Submission
+                { subAssignmentId = asgId
+                , subWrongMeaning = pMeaningWrong p
+                , subWrongReading = pReadingWrong p
+                }
+            | (sid, p) <- fullyCorrect
+            , Just asgId <- [M.lookup sid subjToAsg]
+            ]
+
       putStrLn ""
       putStrLn ("Done. correct=" <> show correct
              <> " wrong=" <> show wrong
              <> " overridden=" <> show overridden)
-      putStrLn ("Fully correct items: " <> show fullyCorrect <> " / " <> show totalItems)
+      putStrLn ("Fully correct items: " <> show fullyCorrectN <> " / " <> show totalItems)
+      pure submissions
 
     loop (q:qs) prog correct wrong overridden = do
       res <- askOne q
@@ -170,30 +257,20 @@ runStudySession rqAfter subjects = do
           let prog' = markOk (qSubject q) (qKind q) prog
           loop qs prog' (correct + 1) wrong overridden
 
-        Right False ->
-          loop qs prog correct (wrong + 1) overridden
+        Right False -> do
+          -- wrong answer, not overridden, not requeued => count as wrong attempt
+          let prog' = incWrong (qSubject q) (qKind q) prog
+          loop qs prog' correct (wrong + 1) overridden
 
         Left OverrideCorrect -> do
+          -- treated as correct, DO NOT increment wrong
           let prog' = markOk (qSubject q) (qKind q) prog
           loop qs prog' (correct + 1) wrong (overridden + 1)
 
-        Left BackToQueue ->
-          loop (requeueAfter rqAfter q qs) prog correct wrong overridden
-
-markOk :: Api.Subject -> QKind -> M.Map Int Progress -> M.Map Int Progress
-markOk subj kind mp =
-  let sid = Api.subjId subj
-  in M.adjust (upd kind) sid mp
-  where
-    upd QMeaning p = p { pMeaningOk = True }
-    upd QReading p = p { pReadingOk = True }
-
--- Insert the question k positions later (or at end if queue shorter).
-requeueAfter :: Int -> Q -> [Q] -> [Q]
-requeueAfter k q qs =
-  let k' = max 0 k
-      (front, back) = splitAt k' qs
-  in front ++ [q] ++ back
+        Left BackToQueue -> do
+          -- wrong attempt + requeue this exact question after rqAfter
+          let prog' = incWrong (qSubject q) (qKind q) prog
+          loop (requeueAfter rqAfter q qs) prog' correct (wrong + 1) overridden
 
 askOne :: Q -> IO (Either WrongAction Bool)
 askOne (Q subj kind) = do
@@ -227,6 +304,10 @@ askOne (Q subj kind) = do
         "b" -> pure (Left BackToQueue)
         _   -> pure (Right False)
 
+kindLabel :: QKind -> String
+kindLabel QMeaning = "meaning"
+kindLabel QReading = "reading"
+
 displayItem :: Api.Subject -> String
 displayItem s =
   case Api.subjChars s of
@@ -236,10 +317,6 @@ displayItem s =
                 (x:_) -> T.unpack x
                 []    -> "?"
       in show (Api.subjType s) <> ":" <> m <> " (#" <> show (Api.subjId s) <> ")"
-
-kindLabel :: QKind -> String
-kindLabel QMeaning = "meaning"
-kindLabel QReading = "reading"
 
 -- Meaning normalization: case-insensitive, trim, collapse spaces
 normMeaning :: Text -> Text
@@ -261,12 +338,3 @@ trim :: String -> String
 trim = f . f
   where
     f = reverse . dropWhile isSpace
-
-shuffle :: [a] -> IO [a]
-shuffle xs = go xs []
-  where
-    go [] acc = pure acc
-    go ys acc = do
-      i <- randomRIO (0, length ys - 1)
-      let (front, a:back) = splitAt i ys
-      go (front ++ back) (a : acc)
