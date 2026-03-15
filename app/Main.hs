@@ -228,8 +228,9 @@ runStudySession rqAfter subjToAsg subjects = do
             | (sid, p) <- M.toList prog
             , pMeaningOk p
             , (not (pReadingNeeded p) || pReadingOk p)
+            , pMeaningWrong p == 0
+            , pReadingWrong p == 0
             ]
-
           totalItems   = M.size prog
           fullyCorrectN = length fullyCorrect
 
@@ -256,7 +257,9 @@ runStudySession rqAfter subjToAsg subjects = do
         Right True -> do
           let prog' = markOk (qSubject q) (qKind q) prog
           loop qs prog' (correct + 1) wrong overridden
-
+        Right False -> do
+          let prog' = incWrong (qSubject q) (qKind q) prog
+          loop (requeueAfter rqAfter q qs) prog' correct (wrong + 1) overridden
         Right False -> do
           -- wrong answer, not overridden, not requeued => count as wrong attempt
           let prog' = incWrong (qSubject q) (qKind q) prog
@@ -296,13 +299,13 @@ askOne (Q subj kind) = do
     then putStrLn "✓" >> pure (Right True)
     else do
       putStrLn ("✗  (accepted: " <> intercalate ", " expected <> ")")
-      putStrLn "   [o]=override as correct  [b]=back to queue  [Enter]=keep wrong"
+      putStrLn "   [o]=override as correct  [b]=requeue later  [Enter]=requeue"
       putStr "   > "
       choice <- getLine
-      case map toLower (trim choice) of
-        "o" -> pure (Left OverrideCorrect)
-        "b" -> pure (Left BackToQueue)
-        _   -> pure (Right False)
+      let c = map toLower (trim choice)
+      if c == "o"
+        then pure (Left OverrideCorrect)
+        else pure (Left BackToQueue)
 
 kindLabel :: QKind -> String
 kindLabel QMeaning = "meaning"
