@@ -17,6 +17,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.List (intercalate)
 import Data.Char (toLower, isSpace)
+import qualified Data.Map.Strict as M
 
 import qualified Romaji
 
@@ -94,42 +95,102 @@ padRight n s = s <> replicate (max 0 (n - length s)) ' '
 -- Study session
 --------------------------------------------------------------------------------
 
-data QKind = QMeaning | QReading deriving (Show, Eq)
+data QKind = QMeaning | QReading deriving (Show, Eq, Ord)
 
 data Q = Q
   { qSubject :: Api.Subject
   , qKind    :: QKind
   } deriving (Show)
 
+data WrongAction = OverrideCorrect | BackToQueue
+  deriving (Show, Eq)
+
+-- Track per subject whether meaning/reading are done correctly.
+data Progress = Progress
+  { pMeaningOk     :: Bool
+  , pReadingNeeded :: Bool
+  , pReadingOk     :: Bool
+  } deriving (Show, Eq)
+
+-- How far to postpone a requeued question.
+requeueAfterK :: Int
+requeueAfterK = 7
+
 runStudySession :: [Api.Subject] -> IO ()
 runStudySession subjects = do
-  let queue = concatMap mkQuestions subjects
-  loop queue 0 0 0
+  let queue    = concatMap mkQuestions subjects
+      progress = M.fromList [ (Api.subjId s, initProgress s) | s <- subjects ]
+  loop queue progress 0 0 0
   where
+    -- only ask reading if there are accepted readings and it's not a radical
     mkQuestions s =
-      Q s QMeaning
-      : [ Q s QReading | not (null (Api.subjReadings s)) ]
+      let rs = acceptedReadings s
+      in Q s QMeaning
+         : [ Q s QReading
+           | Api.subjType s /= Api.Radical
+           , not (null rs)
+           ]
 
-    loop :: [Q] -> Int -> Int -> Int -> IO ()
-    loop [] correct wrong overridden = do
+    initProgress s =
+      let needsReading =
+            Api.subjType s /= Api.Radical
+            && not (null (acceptedReadings s))
+      in Progress False needsReading False
+
+    acceptedReadings s =
+      filter (not . T.null . T.strip) (Api.subjReadings s)
+
+    loop :: [Q] -> M.Map Int Progress -> Int -> Int -> Int -> IO ()
+    loop [] prog correct wrong overridden = do
+      let fullyCorrect =
+            length
+              [ ()
+              | (_, p) <- M.toList prog
+              , pMeaningOk p
+              , (not (pReadingNeeded p) || pReadingOk p)
+              ]
+          totalItems = M.size prog
       putStrLn ""
       putStrLn ("Done. correct=" <> show correct
              <> " wrong=" <> show wrong
              <> " overridden=" <> show overridden)
-    loop (q:qs) correct wrong overridden = do
-      okOrAction <- askOne q
-      case okOrAction of
-        Right True -> loop qs (correct + 1) wrong overridden
-        Right False -> loop qs correct (wrong + 1) overridden
-        Left OverrideCorrect -> loop qs (correct + 1) wrong (overridden + 1)
-        Left BackToQueue     -> loop (qs ++ [q]) correct wrong overridden
+      putStrLn ("Fully correct items: " <> show fullyCorrect <> " / " <> show totalItems)
 
-data WrongAction = OverrideCorrect | BackToQueue
-  deriving (Show, Eq)
+    loop (q:qs) prog correct wrong overridden = do
+      res <- askOne q
+      case res of
+        Right True -> do
+          let prog' = markOk (qSubject q) (qKind q) prog
+          loop qs prog' (correct + 1) wrong overridden
+
+        Right False ->
+          loop qs prog correct (wrong + 1) overridden
+
+        Left OverrideCorrect -> do
+          let prog' = markOk (qSubject q) (qKind q) prog
+          loop qs prog' (correct + 1) wrong (overridden + 1)
+
+        Left BackToQueue ->
+          loop (requeueAfter requeueAfterK q qs) prog correct wrong overridden
+
+markOk :: Api.Subject -> QKind -> M.Map Int Progress -> M.Map Int Progress
+markOk subj kind mp =
+  let sid = Api.subjId subj
+  in M.adjust (upd kind) sid mp
+  where
+    upd QMeaning p = p { pMeaningOk = True }
+    upd QReading p = p { pReadingOk = True }
+
+-- Insert the question k positions later (or at end if queue shorter).
+requeueAfter :: Int -> Q -> [Q] -> [Q]
+requeueAfter k q qs =
+  let k' = max 0 k
+      (front, back) = splitAt k' qs
+  in front ++ [q] ++ back
 
 askOne :: Q -> IO (Either WrongAction Bool)
 askOne (Q subj kind) = do
-  let promptHead = "Item: " <> displayItem subj <> " " <> kindLabel kind <> ">\n"
+  let promptHead = displayItem subj <> " " <> kindLabel kind <> ">\n "
   putStr promptHead
   ans <- getLine
 
@@ -137,15 +198,18 @@ askOne (Q subj kind) = do
         case kind of
           QMeaning ->
             let acceptedNorm = map normMeaning (Api.subjMeanings subj)
-            in (normMeaning (T.pack ans) `elem` acceptedNorm, map T.unpack (Api.subjMeanings subj))
+            in ( normMeaning (T.pack ans) `elem` acceptedNorm
+               , map T.unpack (Api.subjMeanings subj)
+               )
           QReading ->
-            let acceptedNorm = map normReading (Api.subjReadings subj)
-            in (normReading (T.pack ans) `elem` acceptedNorm, map T.unpack (Api.subjReadings subj))
+            let rs = filter (not . T.null . T.strip) (Api.subjReadings subj)
+                acceptedNorm = map normReading rs
+            in ( normReading (T.pack ans) `elem` acceptedNorm
+               , map T.unpack rs
+               )
 
   if isOk
-    then do
-      putStrLn "✓"
-      pure (Right True)
+    then putStrLn "✓" >> pure (Right True)
     else do
       putStrLn ("✗  (accepted: " <> intercalate ", " expected <> ")")
       putStrLn "   [o]=override as correct  [b]=back to queue  [Enter]=keep wrong"
@@ -159,7 +223,7 @@ askOne (Q subj kind) = do
 displayItem :: Api.Subject -> String
 displayItem s =
   case Api.subjChars s of
-    Just c | not (T.null (T.strip c)) -> T.unpack c
+    Just c | not (T.null (T.strip c)) -> T.unpack (T.strip c)
     _ ->
       let m = case Api.subjMeanings s of
                 (x:_) -> T.unpack x
@@ -174,7 +238,7 @@ kindLabel QReading = "reading"
 normMeaning :: Text -> Text
 normMeaning = collapseSpaces . T.toCaseFold . T.strip
 
--- Reading normalization: trim + case-fold (harmless for kana; helps for romaji)
+-- Reading normalization: accept romaji or kana
 normReading :: Text -> Text
 normReading t =
   let t' = T.strip t
