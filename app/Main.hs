@@ -19,6 +19,8 @@ import Data.List (intercalate)
 import Data.Char (toLower, isSpace)
 import qualified Data.Map.Strict as M
 
+import System.Random (randomRIO)
+
 import qualified Romaji
 
 
@@ -43,6 +45,9 @@ main = do
         Cli.optBatchSize opts
         <|> Config.cfgBatchSize cfg
         <|> Just 10
+
+      rqAfter =
+         fromMaybe 7 (Cli.optRequeueAfter opts <|> Config.cfgRequeueAfter cfg)
 
   case Cli.optCommand opts of
     Cli.WhoAmI -> do
@@ -83,7 +88,8 @@ main = do
           subjects <- Api.getSubjectsByIds t subjectIds
 
           putStrLn ("Batch: " <> show (length subjects) <> " items (max " <> show n <> ")")
-          runStudySession subjects
+          runStudySession rqAfter subjects
+
 
 padLeft :: Int -> String -> String
 padLeft n s = replicate (max 0 (n - length s)) ' ' <> s
@@ -116,10 +122,11 @@ data Progress = Progress
 requeueAfterK :: Int
 requeueAfterK = 7
 
-runStudySession :: [Api.Subject] -> IO ()
-runStudySession subjects = do
-  let queue    = concatMap mkQuestions subjects
-      progress = M.fromList [ (Api.subjId s, initProgress s) | s <- subjects ]
+runStudySession :: Int -> [Api.Subject] -> IO ()
+runStudySession rqAfter subjects = do
+  let queue0 = concatMap mkQuestions subjects
+  queue <- shuffle queue0
+  let progress = M.fromList [ (Api.subjId s, initProgress s) | s <- subjects ]
   loop queue progress 0 0 0
   where
     -- only ask reading if there are accepted readings and it's not a radical
@@ -171,7 +178,7 @@ runStudySession subjects = do
           loop qs prog' (correct + 1) wrong (overridden + 1)
 
         Left BackToQueue ->
-          loop (requeueAfter requeueAfterK q qs) prog correct wrong overridden
+          loop (requeueAfter rqAfter q qs) prog correct wrong overridden
 
 markOk :: Api.Subject -> QKind -> M.Map Int Progress -> M.Map Int Progress
 markOk subj kind mp =
@@ -254,3 +261,12 @@ trim :: String -> String
 trim = f . f
   where
     f = reverse . dropWhile isSpace
+
+shuffle :: [a] -> IO [a]
+shuffle xs = go xs []
+  where
+    go [] acc = pure acc
+    go ys acc = do
+      i <- randomRIO (0, length ys - 1)
+      let (front, a:back) = splitAt i ys
+      go (front ++ back) (a : acc)

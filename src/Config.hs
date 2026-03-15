@@ -14,6 +14,7 @@ import System.FilePath ((</>))
 data KrokiConfig = KrokiConfig
   { cfgToken :: Maybe String
   , cfgBatchSize :: Maybe Int
+  , cfgRequeueAfter :: Maybe Int
   } deriving (Show, Eq)
 
 -- Loads ~/.config/kroki/config (via XDG)
@@ -29,6 +30,7 @@ parseConfig s =
   KrokiConfig
     { cfgToken = lookupKey "token" (lines s)
     , cfgBatchSize = lookupInt "batch_size" (lines s)
+    , cfgRequeueAfter = lookupInt "requeue_after" (lines s)
     }
 
 lookupKey :: String -> [String] -> Maybe String

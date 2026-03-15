@@ -15,6 +15,7 @@ data Command
 data Options = Options
   { optToken   :: Maybe String
   , optBatchSize :: Maybe Int
+  , optRequeueAfter :: Maybe Int
   , optCommand :: Command
   } deriving (Show, Eq)
 
@@ -34,6 +35,7 @@ optionsParser =
   Options
     <$> optional tokenOption
     <*> optional batchSizeOption
+    <*> optional requeueAfterOption
     <*> commandParser
 
 tokenOption :: Parser String
@@ -49,6 +51,14 @@ batchSizeOption =
     ( long "batch-size"
    <> metavar "N"
    <> help "Max reviews to include in a study batch (overrides config batch_size)" )
+
+
+requeueAfterOption :: Parser Int
+requeueAfterOption =
+  option auto
+    ( long "requeue-after"
+   <> metavar "K"
+   <> help "Requeue a missed question K positions later (overrides config requeue_after)" )
 
 commandParser :: Parser Command
 commandParser =

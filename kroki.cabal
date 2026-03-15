@@ -75,3 +75,4 @@ executable kroki
       , time
       , directory
       , filepath
+      , random
