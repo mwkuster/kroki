@@ -48,7 +48,7 @@ extra-doc-files:    CHANGELOG.md
 -- extra-source-files:
 
 common warnings
-    ghc-options: -Wall
+    ghc-options: -Wall -threaded
 
 executable kroki
     -- Import common warning flags.
@@ -58,7 +58,7 @@ executable kroki
     main-is:          Main.hs
 
     hs-source-dirs:  app, src
-    other-modules: Cli, Api, Config, Romaji
+    other-modules: Cli, Api, Config, Romaji, Tui
     default-language: GHC2021
 
     ghc-options:
@@ -76,3 +76,9 @@ executable kroki
       , directory
       , filepath
       , random
+      , brick
+      , vty
+      , vector
+      , text
+      , containers
+      , vty-crossplatform

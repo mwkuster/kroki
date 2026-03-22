@@ -19,6 +19,9 @@ import Data.List (intercalate)
 import Data.Char (toLower, isSpace)
 import qualified Data.Map.Strict as M
 
+import qualified Data.Map.Strict as M
+import qualified Tui
+
 import System.Random (randomRIO)
 
 import qualified Romaji
@@ -78,8 +81,10 @@ main = do
 
     Cli.Study -> do
       let n = fromMaybe 10 batchSize
+
       now <- getCurrentTime
       as <- Api.getAvailableAssignments t now n
+
       if null as
         then putStrLn "No reviews available right now."
         else do
@@ -87,20 +92,26 @@ main = do
               subjToAsg  = M.fromList [ (Api.asSubjectId a, Api.asId a) | a <- as ]
 
           subjects <- Api.getSubjectsByIds t subjectIds
+
           putStrLn ("Batch: " <> show (length subjects) <> " items (max " <> show n <> ")")
 
-          subs <- runStudySession rqAfter subjToAsg subjects
+          subs <- Tui.runStudyTui rqAfter subjToAsg subjects
 
-          -- (optional) print summary, and if you added --submit, commit here
           putStrLn ("Items to submit: " <> show (length subs))
-          let withMistakes = length [ () | s <- subs, subWrongMeaning s > 0 || subWrongReading s > 0 ]
-          putStrLn ("Items with mistakes: " <> show withMistakes)
 
           if Cli.optSubmit opts
             then
-               if null subs
-               then putStrLn "Nothing to submit (no fully-correct items)."
-               else do
+              if null subs
+                then putStrLn "Nothing to submit."
+                else do
+                  let withMistakes =
+                        length
+                          [ ()
+                          | s <- subs
+                          , Tui.subWrongMeaning s > 0 || Tui.subWrongReading s > 0
+                          ]
+
+                  putStrLn ("Items with mistakes: " <> show withMistakes)
                   putStrLn ("Ready to submit " <> show (length subs) <> " reviews to WaniKani. Submit now? [y/N]")
                   putStr "> "
                   yn <- getLine
@@ -108,21 +119,22 @@ main = do
                     "y" -> do
                       ts <- getCurrentTime
                       mapM_
-                         (\s -> Api.createReview t
-                                 (subAssignmentId s)
-                                 (subWrongMeaning s)
-                                 (subWrongReading s)
-                                 ts)
-                         subs
+                        (\s -> Api.createReview t
+                                  (Tui.subAssignmentId s)
+                                  (Tui.subWrongMeaning s)
+                                  (Tui.subWrongReading s)
+                                  ts)
+                        subs
                       putStrLn "Submitted."
 
+                      -- refresh current outstanding count
                       now2 <- getCurrentTime
                       summary2 <- Api.getSummary t
                       putStrLn ("Reviews available now (after submit): " <> show (Api.reviewsAvailableNow now2 summary2))
 
                     _ -> putStrLn "Not submitted."
-          else
-             putStrLn "Tip: run with --submit to commit these results to WaniKani."
+            else
+              putStrLn "Tip: run with --submit to commit these results to WaniKani."
 
 
 padLeft :: Int -> String -> String

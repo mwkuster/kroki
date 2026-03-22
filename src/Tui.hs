@@ -1,0 +1,491 @@
+{-# LANGUAGE OverloadedStrings #-}
+
+module Tui
+  ( runStudyTui
+  , Submission(..)
+  , QKind(..)
+  , Q(..)
+  , Progress(..)
+  ) where
+
+import qualified Api
+import qualified Romaji
+
+import Brick
+import qualified Brick.Widgets.Border as B
+import qualified Brick.Widgets.Center as C
+import qualified Brick.Widgets.List as L
+import Brick.Util (fg, on)
+import qualified Graphics.Vty as V
+import qualified Graphics.Vty.CrossPlatform as VCP
+
+import qualified Data.Map.Strict as M
+import qualified Data.Vector as Vec
+import Data.Text (Text)
+import qualified Data.Text as T
+import Data.List (intercalate)
+import System.Random (randomRIO)
+
+--------------------------------------------------------------------------------
+-- Public data
+--------------------------------------------------------------------------------
+
+data QKind = QMeaning | QReading
+  deriving (Show, Eq, Ord)
+
+data Q = Q
+  { qSubject :: Api.Subject
+  , qKind    :: QKind
+  } deriving (Show)
+
+data Submission = Submission
+  { subAssignmentId :: Int
+  , subWrongMeaning :: Int
+  , subWrongReading :: Int
+  } deriving (Show, Eq)
+
+data Progress = Progress
+  { pMeaningOk     :: Bool
+  , pReadingNeeded :: Bool
+  , pReadingOk     :: Bool
+  , pMeaningWrong  :: Int
+  , pReadingWrong  :: Int
+  } deriving (Show, Eq)
+
+--------------------------------------------------------------------------------
+-- TUI state
+--------------------------------------------------------------------------------
+
+data Name = QueueList
+  deriving (Ord, Eq, Show)
+
+data Mode
+  = Normal
+  | Feedback Text
+  | ConfirmSubmit
+  | Finished
+  deriving (Show, Eq)
+
+data AppState = AppState
+  { stQueue        :: [Q]
+  , stQueueWidget  :: L.List Name Q
+  , stInput        :: Text
+  , stProgress     :: M.Map Int Progress
+  , stSubjToAsg    :: M.Map Int Int
+  , stRequeueAfter :: Int
+  , stCorrect      :: Int
+  , stWrong        :: Int
+  , stOverridden   :: Int
+  , stMode         :: Mode
+  }
+
+--------------------------------------------------------------------------------
+-- Entry point
+--------------------------------------------------------------------------------
+
+runStudyTui :: Int -> M.Map Int Int -> [Api.Subject] -> IO [Submission]
+runStudyTui rqAfter subjToAsg subjects = do
+  let queue0 = concatMap mkQuestions subjects
+      prog0  = M.fromList [ (Api.subjId s, initProgress s) | s <- subjects ]
+      st0    = AppState
+        { stQueue        = queue0
+        , stQueueWidget  = mkQueueWidget queue0
+        , stInput        = T.empty
+        , stProgress     = prog0
+        , stSubjToAsg    = subjToAsg
+        , stRequeueAfter = rqAfter
+        , stCorrect      = 0
+        , stWrong        = 0
+        , stOverridden   = 0
+        , stMode         = Normal
+        }
+
+  let buildVty = VCP.mkVty V.defaultConfig
+  initialVty <- buildVty
+  finalState <- customMain initialVty buildVty Nothing app st0
+  pure (mkSubmissions finalState)
+
+--------------------------------------------------------------------------------
+-- App
+--------------------------------------------------------------------------------
+
+app :: App AppState e Name
+app = App
+  { appDraw         = drawUi
+  , appChooseCursor = neverShowCursor
+  , appHandleEvent  = handleEvent
+  , appStartEvent   = pure ()
+  , appAttrMap      = const theMap
+  }
+
+theMap :: AttrMap
+theMap = attrMap V.defAttr
+  [ (L.listAttr,         V.white `on` V.black)
+  , (L.listSelectedAttr, V.black `on` V.yellow)
+  , (attrName "header",  fg V.cyan)
+  , (attrName "ok",      fg V.green)
+  , (attrName "bad",     fg V.red)
+  , (attrName "hint",    fg V.brightBlack)
+  ]
+
+--------------------------------------------------------------------------------
+-- Drawing
+--------------------------------------------------------------------------------
+
+drawUi :: AppState -> [Widget Name]
+drawUi st =
+  [ C.center $
+      hBox
+        [ hLimit 36 $ drawQueue st
+        , B.vBorder
+        , padLeft (Pad 1) $ hLimit 80 $ drawMain st
+        ]
+  ]
+
+drawQueue :: AppState -> Widget Name
+drawQueue st =
+  B.borderWithLabel (str "Queue") $
+    vBox
+      [ L.renderList drawQueueItem True (stQueueWidget st)
+      , padTop (Pad 1) $
+          withAttr (attrName "hint") $
+            str ("remaining: " <> show (length (stQueue st)))
+      ]
+
+drawQueueItem :: Bool -> Q -> Widget Name
+drawQueueItem _ q =
+  let s = qSubject q
+  in str (displayItem s <> " [" <> kindLabel (qKind q) <> "]")
+
+drawMain :: AppState -> Widget Name
+drawMain st =
+  case currentQuestion st of
+    Nothing ->
+      B.borderWithLabel (str "Done") $
+        padAll 1 $
+          vBox
+            [ withAttr (attrName "ok") $ str "Session finished."
+            , str ("correct:     " <> show (stCorrect st))
+            , str ("wrong:       " <> show (stWrong st))
+            , str ("overridden:  " <> show (stOverridden st))
+            , str ("submissions: " <> show (length (mkSubmissions st)))
+            , padTop (Pad 1) $ str "Press q to quit."
+            ]
+
+    Just q ->
+      B.borderWithLabel (str "Current") $
+        padAll 1 $
+          vBox
+            [ withAttr (attrName "header") $
+                txt (T.pack (displayItem (qSubject q) <> " — " <> kindLabel (qKind q)))
+            , padTop (Pad 1) $
+                B.borderWithLabel (str "Input") $
+                  padAll 1 $
+                    txt (stInput st)
+            , padTop (Pad 1) $
+                drawMode st q
+            , padTop (Pad 1) $
+                withAttr (attrName "hint") $
+                  str "Enter=submit  o=override  b=requeue  s=submit batch  q=quit  Backspace=delete"
+            ]
+
+drawMode :: AppState -> Q -> Widget Name
+drawMode st q =
+  case stMode st of
+    Normal ->
+      emptyWidget
+    Feedback msg ->
+      vBox
+        [ withAttr (attrName "bad") $ txt msg
+        , padTop (Pad 1) $
+            withAttr (attrName "hint") $
+              txt ("Accepted: " <> acceptedPreview q)
+        ]
+    ConfirmSubmit ->
+      withAttr (attrName "header") $ str "Leave TUI and continue to submit batch? [y/N]"
+    Finished ->
+      withAttr (attrName "ok") $ str "Finished."
+
+--------------------------------------------------------------------------------
+-- Event handling
+--------------------------------------------------------------------------------
+
+handleEvent :: BrickEvent Name e -> EventM Name AppState ()
+handleEvent (VtyEvent ev) = do
+  st <- get
+  case stMode st of
+    ConfirmSubmit -> handleConfirm ev
+    Finished      -> handleFinished ev
+    _             -> handleNormal ev
+handleEvent _ = pure ()
+
+handleConfirm :: V.Event -> EventM Name AppState ()
+handleConfirm ev =
+  case ev of
+    V.EvKey (V.KChar 'y') [] -> halt
+    V.EvKey V.KEnter []      -> halt
+    V.EvKey (V.KChar 'n') [] -> do
+      st <- get
+      put st { stMode = Normal }
+    V.EvKey V.KEsc [] -> do
+      st <- get
+      put st { stMode = Normal }
+    _ -> pure ()
+
+handleFinished :: V.Event -> EventM Name AppState ()
+handleFinished ev =
+  case ev of
+    V.EvKey (V.KChar 'q') [] -> halt
+    V.EvKey V.KEsc []        -> halt
+    _                        -> pure ()
+
+handleNormal :: V.Event -> EventM Name AppState ()
+handleNormal ev =
+  case ev of
+    V.EvKey (V.KChar 'q') [] ->
+      halt
+
+    V.EvKey (V.KChar 's') [] -> do
+      st <- get
+      put st { stMode = ConfirmSubmit }
+
+    V.EvKey (V.KChar 'o') [] -> do
+      st <- get
+      case currentQuestion st of
+        Nothing -> pure ()
+        Just q  -> put (advanceOverride q st)
+
+    V.EvKey (V.KChar 'b') [] -> do
+      st <- get
+      case currentQuestion st of
+        Nothing -> pure ()
+        Just q  -> put (requeueWrong q st)
+
+    V.EvKey V.KEnter [] -> do
+      st <- get
+      case currentQuestion st of
+        Nothing -> pure ()
+        Just q  ->
+          put (submitAnswer q (T.strip (stInput st)) st)
+
+    V.EvKey V.KBS [] -> do
+      st <- get
+      put st
+        { stInput = if T.null (stInput st) then T.empty else T.init (stInput st)
+        , stMode  = Normal
+        }
+
+    V.EvKey V.KDel [] -> do
+      st <- get
+      put st
+        { stInput = if T.null (stInput st) then T.empty else T.init (stInput st)
+        , stMode  = Normal
+        }
+
+    V.EvKey (V.KChar c) [] -> do
+      st <- get
+      put st
+        { stInput = stInput st <> T.singleton c
+        , stMode  = Normal
+        }
+
+    _ -> pure ()
+
+--------------------------------------------------------------------------------
+-- Session logic
+--------------------------------------------------------------------------------
+
+currentQuestion :: AppState -> Maybe Q
+currentQuestion st =
+  case stQueue st of
+    []    -> Nothing
+    (q:_) -> Just q
+
+submitAnswer :: Q -> Text -> AppState -> AppState
+submitAnswer q answer st =
+  let (ok, expected) = checkAnswer q answer
+  in if ok
+       then advanceCorrect q st
+       else st
+          { stInput = T.empty
+          , stMode  = Feedback ("✗")
+          }
+
+advanceCorrect :: Q -> AppState -> AppState
+advanceCorrect q st =
+  let prog'  = markOk (qSubject q) (qKind q) (stProgress st)
+      queue' = drop 1 (stQueue st)
+  in st
+     { stQueue       = queue'
+     , stQueueWidget = mkQueueWidget queue'
+     , stProgress    = prog'
+     , stCorrect     = stCorrect st + 1
+     , stInput       = T.empty
+     , stMode        = if null queue' then Finished else Feedback "✓"
+     }
+
+advanceOverride :: Q -> AppState -> AppState
+advanceOverride q st =
+  let prog'  = markOk (qSubject q) (qKind q) (stProgress st)
+      queue' = drop 1 (stQueue st)
+  in st
+     { stQueue       = queue'
+     , stQueueWidget = mkQueueWidget queue'
+     , stProgress    = prog'
+     , stCorrect     = stCorrect st + 1
+     , stOverridden  = stOverridden st + 1
+     , stInput       = T.empty
+     , stMode        = if null queue' then Finished else Feedback "override"
+     }
+
+requeueWrong :: Q -> AppState -> AppState
+requeueWrong q st =
+  let prog'  = incWrong (qSubject q) (qKind q) (stProgress st)
+      queue' = requeueAfterK (stRequeueAfter st) q (drop 1 (stQueue st))
+  in st
+     { stQueue       = queue'
+     , stQueueWidget = mkQueueWidget queue'
+     , stProgress    = prog'
+     , stWrong       = stWrong st + 1
+     , stInput       = T.empty
+     , stMode        = Feedback "requeued"
+     }
+
+requeueAfterK :: Int -> Q -> [Q] -> [Q]
+requeueAfterK k q qs =
+  let k' = max 0 k
+      (front, back) = splitAt k' qs
+  in front ++ [q] ++ back
+
+mkQueueWidget :: [Q] -> L.List Name Q
+mkQueueWidget qs =
+  L.list QueueList (Vec.fromList qs) 1
+
+--------------------------------------------------------------------------------
+-- Progress / submissions
+--------------------------------------------------------------------------------
+
+markOk :: Api.Subject -> QKind -> M.Map Int Progress -> M.Map Int Progress
+markOk subj kind mp =
+  let sid = Api.subjId subj
+  in M.adjust upd sid mp
+  where
+    upd p =
+      case kind of
+        QMeaning -> p { pMeaningOk = True }
+        QReading -> p { pReadingOk = True }
+
+incWrong :: Api.Subject -> QKind -> M.Map Int Progress -> M.Map Int Progress
+incWrong subj kind mp =
+  let sid = Api.subjId subj
+  in M.adjust upd sid mp
+  where
+    upd p =
+      case kind of
+        QMeaning -> p { pMeaningWrong = pMeaningWrong p + 1 }
+        QReading -> p { pReadingWrong = pReadingWrong p + 1 }
+
+mkSubmissions :: AppState -> [Submission]
+mkSubmissions st =
+  [ Submission
+      { subAssignmentId = asgId
+      , subWrongMeaning = pMeaningWrong p
+      , subWrongReading = pReadingWrong p
+      }
+  | (sid, p) <- M.toList (stProgress st)
+  , Just asgId <- [M.lookup sid (stSubjToAsg st)]
+  ]
+
+--------------------------------------------------------------------------------
+-- Setup helpers
+--------------------------------------------------------------------------------
+
+mkQuestions :: Api.Subject -> [Q]
+mkQuestions s =
+  let rs = acceptedReadings s
+  in Q s QMeaning
+     : [ Q s QReading
+       | Api.subjType s /= Api.Radical
+       , not (null rs)
+       ]
+
+initProgress :: Api.Subject -> Progress
+initProgress s =
+  let needsReading =
+        Api.subjType s /= Api.Radical
+        && not (null (acceptedReadings s))
+  in Progress False needsReading False 0 0
+
+acceptedReadings :: Api.Subject -> [Text]
+acceptedReadings s =
+  filter (not . T.null . T.strip) (Api.subjReadings s)
+
+shuffle :: [a] -> IO [a]
+shuffle xs = go xs []
+  where
+    go [] acc = pure acc
+    go ys acc = do
+      i <- randomRIO (0, length ys - 1)
+      let (front, a:back) = splitAt i ys
+      go (front ++ back) (a : acc)
+
+--------------------------------------------------------------------------------
+-- Answer checking / display
+--------------------------------------------------------------------------------
+
+checkAnswer :: Q -> Text -> (Bool, [String])
+checkAnswer (Q subj kind) ans =
+  case kind of
+    QMeaning ->
+      let acceptedNorm = map normMeaning (Api.subjMeanings subj)
+      in ( normMeaning ans `elem` acceptedNorm
+         , map T.unpack (Api.subjMeanings subj)
+         )
+    QReading ->
+      let rs = acceptedReadings subj
+          acceptedNorm = map normReading rs
+      in ( normReading ans `elem` acceptedNorm
+         , map T.unpack rs
+         )
+
+acceptedPreview :: Q -> Text
+acceptedPreview (Q subj kind) =
+  case kind of
+    QMeaning -> T.intercalate ", " (Api.subjMeanings subj)
+    QReading -> T.intercalate ", " (acceptedReadings subj)
+
+displayItem :: Api.Subject -> String
+displayItem s =
+  let tag =
+        case Api.subjType s of
+          Api.Kanji          -> " (Kanji)"
+          Api.Radical        -> " (Radical)"
+          Api.Vocabulary     -> " (Vocab)"
+          Api.KanaVocabulary -> " (Vocab)"
+      core =
+        case Api.subjChars s of
+          Just c | not (T.null (T.strip c)) -> T.unpack (T.strip c)
+          _ ->
+            let m = case Api.subjMeanings s of
+                      (x:_) -> T.unpack x
+                      []    -> "?"
+            in m <> " (#" <> show (Api.subjId s) <> ")"
+  in core <> tag
+
+kindLabel :: QKind -> String
+kindLabel QMeaning = "meaning"
+kindLabel QReading = "reading"
+
+normMeaning :: Text -> Text
+normMeaning = collapseSpaces . T.toCaseFold . T.strip
+
+normReading :: Text -> Text
+normReading t =
+  let t' = T.strip t
+  in if T.all (\c -> (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '\'') t'
+       then Romaji.romajiToHiragana (T.toCaseFold t')
+       else T.toCaseFold t'
+
+collapseSpaces :: Text -> Text
+collapseSpaces =
+  T.unwords . filter (not . T.null) . T.words
