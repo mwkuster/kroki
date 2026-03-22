@@ -87,9 +87,12 @@ runStudyTui :: Int -> M.Map Int Int -> [Api.Subject] -> IO [Submission]
 runStudyTui rqAfter subjToAsg subjects = do
   let queue0 = concatMap mkQuestions subjects
       prog0  = M.fromList [ (Api.subjId s, initProgress s) | s <- subjects ]
-      st0    = AppState
-        { stQueue        = queue0
-        , stQueueWidget  = mkQueueWidget queue0
+
+  queue <- shuffle queue0
+
+  let st0 = AppState
+        { stQueue        = queue
+        , stQueueWidget  = mkQueueWidget queue
         , stInput        = T.empty
         , stProgress     = prog0
         , stSubjToAsg    = subjToAsg
@@ -169,7 +172,7 @@ drawMain st =
             , str ("wrong:       " <> show (stWrong st))
             , str ("overridden:  " <> show (stOverridden st))
             , str ("submissions: " <> show (length (mkSubmissions st)))
-            , padTop (Pad 1) $ str "Press q to quit."
+            , padTop (Pad 1) $ str "Press Esc or Ctrl-q to quit."
             ]
 
     Just q ->
@@ -186,7 +189,7 @@ drawMain st =
                 drawMode st q
             , padTop (Pad 1) $
                 withAttr (attrName "hint") $
-                  str "Enter=submit  o=override  b=requeue  s=submit batch  q=quit  Backspace=delete"
+                  str "Enter=submit  Ctrl-o=override  Ctrl-b=requeue  Ctrl-s=submit batch  Esc=quit  Backspace=delete"
             ]
 
 drawMode :: AppState -> Q -> Widget Name
@@ -235,31 +238,34 @@ handleConfirm ev =
 handleFinished :: V.Event -> EventM Name AppState ()
 handleFinished ev =
   case ev of
-    V.EvKey (V.KChar 'q') [] -> halt
-    V.EvKey V.KEsc []        -> halt
-    _                        -> pure ()
+    V.EvKey (V.KChar 'q') [V.MCtrl] -> halt
+    V.EvKey V.KEsc []               -> halt
+    _                               -> pure ()
 
 handleNormal :: V.Event -> EventM Name AppState ()
 handleNormal ev =
   case ev of
-    V.EvKey (V.KChar 'q') [] ->
+    V.EvKey (V.KChar 'q') [V.MCtrl] ->
       halt
 
-    V.EvKey (V.KChar 's') [] -> do
+    V.EvKey (V.KChar 's') [V.MCtrl] -> do
       st <- get
       put st { stMode = ConfirmSubmit }
 
-    V.EvKey (V.KChar 'o') [] -> do
+    V.EvKey (V.KChar 'o') [V.MCtrl] -> do
       st <- get
       case currentQuestion st of
         Nothing -> pure ()
         Just q  -> put (advanceOverride q st)
 
-    V.EvKey (V.KChar 'b') [] -> do
+    V.EvKey (V.KChar 'b') [V.MCtrl] -> do
       st <- get
       case currentQuestion st of
         Nothing -> pure ()
         Just q  -> put (requeueWrong q st)
+
+    V.EvKey V.KEsc [] ->
+      halt
 
     V.EvKey V.KEnter [] -> do
       st <- get
