@@ -19,6 +19,7 @@ import Brick.Util (fg, on)
 import qualified Graphics.Vty as V
 import qualified Graphics.Vty.CrossPlatform as VCP
 
+import Control.Monad.IO.Class (liftIO)
 import qualified Data.Map.Strict as M
 import qualified Data.Vector as Vec
 import Data.Text (Text)
@@ -61,6 +62,7 @@ data Name = QueueList
 
 data Mode
   = Normal
+  | WrongAnswer [String]
   | Feedback Text
   | ConfirmSubmit
   | Finished
@@ -77,14 +79,15 @@ data AppState = AppState
   , stWrong        :: Int
   , stOverridden   :: Int
   , stMode         :: Mode
+  , stBanner       :: Maybe Text
   }
 
 --------------------------------------------------------------------------------
 -- Entry point
 --------------------------------------------------------------------------------
 
-runStudyTui :: Int -> M.Map Int Int -> [Api.Subject] -> IO [Submission]
-runStudyTui rqAfter subjToAsg subjects = do
+runStudyTui :: Int -> M.Map Int Int -> [Api.Subject] -> ([Submission] -> IO String) -> IO [Submission]
+runStudyTui rqAfter subjToAsg subjects submitFn = do
   let queue0 = concatMap mkQuestions subjects
       prog0  = M.fromList [ (Api.subjId s, initProgress s) | s <- subjects ]
 
@@ -101,22 +104,23 @@ runStudyTui rqAfter subjToAsg subjects = do
         , stWrong        = 0
         , stOverridden   = 0
         , stMode         = Normal
+        , stBanner       = Nothing
         }
 
   let buildVty = VCP.mkVty V.defaultConfig
   initialVty <- buildVty
-  finalState <- customMain initialVty buildVty Nothing app st0
+  finalState <- customMain initialVty buildVty Nothing (app submitFn) st0
   pure (mkSubmissions finalState)
 
 --------------------------------------------------------------------------------
 -- App
 --------------------------------------------------------------------------------
 
-app :: App AppState e Name
-app = App
+app :: ([Submission] -> IO String) -> App AppState e Name
+app submitFn = App
   { appDraw         = drawUi
   , appChooseCursor = neverShowCursor
-  , appHandleEvent  = handleEvent
+  , appHandleEvent  = handleEvent submitFn
   , appStartEvent   = pure ()
   , appAttrMap      = const theMap
   }
@@ -166,14 +170,38 @@ drawMain st =
     Nothing ->
       B.borderWithLabel (str "Done") $
         padAll 1 $
-          vBox
-            [ withAttr (attrName "ok") $ str "Session finished."
-            , str ("correct:     " <> show (stCorrect st))
-            , str ("wrong:       " <> show (stWrong st))
-            , str ("overridden:  " <> show (stOverridden st))
-            , str ("submissions: " <> show (length (mkSubmissions st)))
-            , padTop (Pad 1) $ str "Press Esc or Ctrl-q to quit."
-            ]
+          let confirmWidgets =
+                case stMode st of
+                  ConfirmSubmit ->
+                    let subs = mkSubmissions st
+                        total = length subs
+                        withMistakes =
+                          length [ () | s <- subs, subWrongMeaning s > 0 || subWrongReading s > 0 ]
+                    in [ padTop (Pad 1) $
+                           withAttr (attrName "header") $
+                             str ("Submit " <> show total <> " reviews to WaniKani? [y/N]")
+                       , str ("Items with mistakes: " <> show withMistakes)
+                       ]
+                  _ -> []
+              bannerWidgets =
+                case stBanner st of
+                  Just msg -> [padTop (Pad 1) (txt msg)]
+                  Nothing  -> []
+              hintLine =
+                case stMode st of
+                  ConfirmSubmit -> str "y/Enter=confirm  n/Esc=cancel"
+                  _             -> str "Ctrl-s=submit to WaniKani  Esc=quit"
+          in vBox
+               ( [ withAttr (attrName "ok") $ str "Session finished."
+                 , str ("correct:     " <> show (stCorrect st))
+                 , str ("wrong:       " <> show (stWrong st))
+                 , str ("overridden:  " <> show (stOverridden st))
+                 , str ("submissions: " <> show (length (mkSubmissions st)))
+                 ]
+              ++ confirmWidgets
+              ++ bannerWidgets
+              ++ [ padTop (Pad 1) hintLine ]
+               )
 
     Just q ->
       B.borderWithLabel (str "Current") $
@@ -189,7 +217,7 @@ drawMain st =
                 drawMode st q
             , padTop (Pad 1) $
                 withAttr (attrName "hint") $
-                  str "Enter=submit  Ctrl-o=override  Ctrl-b=requeue  Ctrl-s=submit batch  Esc=quit  Backspace=delete"
+                  str "Enter=submit answer  Ctrl-o=override  Ctrl-b=requeue  Ctrl-s=submit batch  Esc=quit"
             ]
 
 drawMode :: AppState -> Q -> Widget Name
@@ -197,42 +225,110 @@ drawMode st q =
   case stMode st of
     Normal ->
       emptyWidget
-    Feedback msg ->
+
+    WrongAnswer expected ->
       vBox
-        [ withAttr (attrName "bad") $ txt msg
+        [ withAttr (attrName "bad") $
+            txt ("✗ accepted: " <> T.pack (intercalate ", " expected))
         , padTop (Pad 1) $
             withAttr (attrName "hint") $
-              txt ("Accepted: " <> acceptedPreview q)
+              str "Ctrl-o=override as correct  Ctrl-b=requeue later  Enter=requeue"
         ]
+
+    Feedback msg ->
+      withAttr (attrName "ok") $ txt msg
+
     ConfirmSubmit ->
-      withAttr (attrName "header") $ str "Leave TUI and continue to submit batch? [y/N]"
+      let subs = mkSubmissions st
+          total = length subs
+          withMistakes =
+            length
+              [ ()
+              | s <- subs
+              , subWrongMeaning s > 0 || subWrongReading s > 0
+              ]
+      in vBox
+          [ withAttr (attrName "header") $
+              str ("Submit " <> show total <> " reviews to WaniKani? [y/N]")
+          , padTop (Pad 1) $
+              str ("Items with mistakes: " <> show withMistakes)
+          ]
+
     Finished ->
-      withAttr (attrName "ok") $ str "Finished."
+      vBox $
+        [ withAttr (attrName "ok") $ str "Finished." ] ++
+        case stBanner st of
+          Just msg -> [padTop (Pad 1) (txt msg)]
+          Nothing  -> []
 
 --------------------------------------------------------------------------------
 -- Event handling
 --------------------------------------------------------------------------------
 
-handleEvent :: BrickEvent Name e -> EventM Name AppState ()
-handleEvent (VtyEvent ev) = do
+handleEvent :: ([Submission] -> IO String) -> BrickEvent Name e -> EventM Name AppState ()
+handleEvent submitFn (VtyEvent ev) = do
   st <- get
   case stMode st of
-    ConfirmSubmit -> handleConfirm ev
-    Finished      -> handleFinished ev
-    _             -> handleNormal ev
-handleEvent _ = pure ()
+    WrongAnswer expected -> handleWrongAnswer expected ev
+    ConfirmSubmit        -> handleConfirm submitFn ev
+    Finished             -> handleFinished ev
+    _                    -> handleNormal ev
+handleEvent _ _ = pure ()
 
-handleConfirm :: V.Event -> EventM Name AppState ()
-handleConfirm ev =
+handleWrongAnswer :: [String] -> V.Event -> EventM Name AppState ()
+handleWrongAnswer _ ev =
   case ev of
-    V.EvKey (V.KChar 'y') [] -> halt
-    V.EvKey V.KEnter []      -> halt
-    V.EvKey (V.KChar 'n') [] -> do
+    V.EvKey (V.KChar 'o') [V.MCtrl] -> do
       st <- get
-      put st { stMode = Normal }
+      case currentQuestion st of
+        Nothing -> pure ()
+        Just q  -> put (advanceOverride q st { stMode = Normal })
+
+    V.EvKey (V.KChar 'b') [V.MCtrl] -> do
+      st <- get
+      case currentQuestion st of
+        Nothing -> pure ()
+        Just q  -> put (requeueWrong q st { stMode = Normal })
+
+    V.EvKey V.KEnter [] -> do
+      st <- get
+      case currentQuestion st of
+        Nothing -> pure ()
+        Just q  -> put (requeueWrong q st { stMode = Normal })
+
     V.EvKey V.KEsc [] -> do
       st <- get
       put st { stMode = Normal }
+
+    _ -> pure ()
+
+handleConfirm :: ([Submission] -> IO String) -> V.Event -> EventM Name AppState ()
+handleConfirm submitFn ev =
+  case ev of
+    V.EvKey (V.KChar 'y') [] -> do
+      st <- get
+      msg <- liftIO (submitFn (mkSubmissions st))
+      put st
+        { stMode   = Finished
+        , stBanner = Just (T.pack msg)
+        }
+
+    V.EvKey V.KEnter [] -> do
+      st <- get
+      msg <- liftIO (submitFn (mkSubmissions st))
+      put st
+        { stMode   = Finished
+        , stBanner = Just (T.pack msg)
+        }
+
+    V.EvKey (V.KChar 'n') [] -> do
+      st <- get
+      put st { stMode = Normal }
+
+    V.EvKey V.KEsc [] -> do
+      st <- get
+      put st { stMode = Normal }
+
     _ -> pure ()
 
 handleFinished :: V.Event -> EventM Name AppState ()
@@ -240,6 +336,9 @@ handleFinished ev =
   case ev of
     V.EvKey (V.KChar 'q') [V.MCtrl] -> halt
     V.EvKey V.KEsc []               -> halt
+    V.EvKey (V.KChar 's') [V.MCtrl] -> do
+      st <- get
+      put st { stMode = ConfirmSubmit }
     _                               -> pure ()
 
 handleNormal :: V.Event -> EventM Name AppState ()
@@ -314,7 +413,7 @@ submitAnswer q answer st =
        then advanceCorrect q st
        else st
           { stInput = T.empty
-          , stMode  = Feedback ("✗")
+          , stMode  = WrongAnswer expected
           }
 
 advanceCorrect :: Q -> AppState -> AppState
