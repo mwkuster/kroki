@@ -190,7 +190,8 @@ drawMain st =
               hintLine =
                 case stMode st of
                   ConfirmSubmit -> str "y/Enter=confirm  n/Esc=cancel"
-                  _             -> str "Ctrl-s=submit to WaniKani  Esc=quit"
+                  _ | Just _ <- stBanner st -> str "Press Esc or Ctrl-q to quit."
+                  _ -> str "Ctrl-s=submit to WaniKani  Esc=quit"
           in vBox
                ( [ withAttr (attrName "ok") $ str "Session finished."
                  , str ("correct:     " <> show (stCorrect st))
@@ -338,7 +339,9 @@ handleFinished ev =
     V.EvKey V.KEsc []               -> halt
     V.EvKey (V.KChar 's') [V.MCtrl] -> do
       st <- get
-      put st { stMode = ConfirmSubmit }
+      case stBanner st of
+        Nothing -> put st { stMode = ConfirmSubmit }
+        Just _  -> pure ()
     _                               -> pure ()
 
 handleNormal :: V.Event -> EventM Name AppState ()
