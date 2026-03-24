@@ -2,6 +2,7 @@
 
 module Romaji
   ( romajiToHiragana
+  , romajiToHiraganaLive
   ) where
 
 import Data.Char (isAlpha, toLower)
@@ -123,3 +124,54 @@ basicRows =
   -- small tsu
   , ("xtsu","っ"),("ltsu","っ")
   ]
+
+-- | Like 'romajiToHiragana' but for live display while the user is still typing.
+-- Converts all complete syllables from the left; any trailing characters that
+-- could still be part of an in-progress syllable are shown as-is.
+-- Example: "shika" → "しか", "shi" → "し", "sh" → "sh" (pending)
+romajiToHiraganaLive :: Text -> Text
+romajiToHiraganaLive input =
+  let t             = T.toLower (T.filter keep input)
+      (kana, pend)  = liveConvert t
+  in kana <> pend
+  where
+    keep c = isAlpha c || c == '\''
+
+liveConvert :: Text -> (Text, Text)
+liveConvert t
+  | T.null t  = (T.empty, T.empty)
+  | otherwise =
+      case smallTsu t of
+        Just (k, rest) -> prepend k (liveConvert rest)
+        Nothing ->
+          case liveParseN t of
+            Just (k, rest) -> prepend k (liveConvert rest)
+            Nothing ->
+              case matchKana t of
+                Just (k, rest) -> prepend k (liveConvert rest)
+                Nothing ->
+                  if isPending t
+                    then (T.empty, t)
+                    else prepend (T.take 1 t) (liveConvert (T.drop 1 t))
+  where
+    prepend k (k2, p) = (k <> k2, p)
+
+-- | Like 'parseN' but keeps a trailing lone \"n\" pending instead of
+-- converting it immediately, so the user can still type \"na\", \"ni\", etc.
+liveParseN :: Text -> Maybe (Text, Text)
+liveParseN t
+  | "n'"  `T.isPrefixOf` t = Just ("ん", T.drop 2 t)
+  | "nn"  `T.isPrefixOf` t = Just ("ん", T.drop 1 t)
+  | "n"   `T.isPrefixOf` t =
+      case T.uncons (T.drop 1 t) of
+        Nothing     -> Nothing   -- trailing n: keep as pending
+        Just (c, _)
+          | c `elem` ("aiueoy" :: String) -> Nothing   -- na/ni/nu/…
+          | otherwise                     -> Just ("ん", T.drop 1 t)
+  | otherwise = Nothing
+
+-- | True when 't' is a non-empty prefix of at least one romaji entry in
+-- the table, meaning more characters could complete it into a kana.
+isPending :: Text -> Bool
+isPending t =
+  not (T.null t) && any (\(r, _) -> t `T.isPrefixOf` r) table

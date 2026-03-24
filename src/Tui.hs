@@ -213,7 +213,7 @@ drawMain st =
             , padTop (Pad 1) $
                 B.borderWithLabel (str "Input") $
                   padAll 1 $
-                    txt (stInput st)
+                    txt (displayInput (qKind q) (stInput st))
             , padTop (Pad 1) $
                 drawMode st q
             , padTop (Pad 1) $
@@ -583,6 +583,10 @@ displayItem s =
 kindLabel :: QKind -> String
 kindLabel QMeaning = "meaning"
 kindLabel QReading = "reading"
+
+displayInput :: QKind -> Text -> Text
+displayInput QReading t = Romaji.romajiToHiraganaLive t
+displayInput QMeaning t = t
 
 normMeaning :: Text -> Text
 normMeaning = collapseSpaces . T.toCaseFold . T.strip
