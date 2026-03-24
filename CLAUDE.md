@@ -1,0 +1,61 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Build and Run
+
+```bash
+cabal build
+cabal run kroki -- --help
+cabal run kroki -- whoami
+cabal run kroki -- reviews
+cabal run kroki -- study --batch-size 5
+cabal run kroki -- study --batch-size 5 --submit
+```
+
+Token resolution order: `--token` flag → `WANIKANI_API_TOKEN` env var → `~/.config/kroki/config`
+
+Config file format (`~/.config/kroki/config`):
+```
+token=<your-api-token>
+batch_size=10
+requeue_after=7
+```
+
+There are no automated tests.
+
+## Architecture
+
+This is a WaniKani (kanji/vocabulary SRS) CLI+TUI app. The study flow:
+1. `Main.hs` parses args, loads config, resolves token
+2. For `study`: fetch available assignments from API → fetch subject details → run interactive TUI → optionally submit results back to WaniKani
+
+### Modules
+
+- **`Api.hs`** — WaniKani REST API client (`req` library). Fetches users, summaries, assignments, subjects; submits reviews. Subjects are batch-fetched in chunks of 100.
+- **`Cli.hs`** — `optparse-applicative` command/option definitions (`WhoAmI`, `Reviews`, `Study`).
+- **`Config.hs`** — Simple key=value config file parser for `~/.config/kroki/config`.
+- **`Romaji.hs`** — Romaji→hiragana converter (longest-match-first lookup table). Handles consonant doubling, palatalized sounds, etc. Used by `Tui.normReading`.
+- **`Tui.hs`** — `brick`-based interactive study session. Manages a queue of questions (`QMeaning`/`QReading`), tracks per-subject progress, and produces `Submission` records. Modes: Normal → WrongAnswer → Feedback → ConfirmSubmit → Finished.
+
+### TUI Keybindings
+- `Enter` — submit answer
+- `Ctrl-o` — override as correct
+- `Ctrl-b` — requeue question later
+- `Ctrl-s` — submit batch to WaniKani
+- `Esc`/`Ctrl-q` — quit
+
+### Key Types
+
+```haskell
+-- Per-subject progress tracking
+data Progress = Progress
+  { pMeaningOk :: Bool, pReadingNeeded :: Bool, pReadingOk :: Bool
+  , pMeaningWrong :: Int, pReadingWrong :: Int }
+
+-- What gets submitted back to WaniKani
+data Submission = Submission
+  { subAssignmentId :: Int, subWrongMeaning :: Int, subWrongReading :: Int }
+```
+
+Answer normalization: meanings use case-folding + space-collapsing; readings use romaji→hiragana conversion via `Romaji.hs`.
