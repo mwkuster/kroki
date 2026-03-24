@@ -2,6 +2,7 @@
 
 module Tui
   ( runStudyTui
+  , SubmitResult(..)
   , Submission(..)
   , QKind(..)
   , Q(..)
@@ -45,6 +46,11 @@ data Submission = Submission
   , subWrongReading :: Int
   } deriving (Show, Eq)
 
+data SubmitResult = SubmitResult
+  { srMessage :: String
+  , srHasMore :: Bool
+  } deriving (Show)
+
 data Progress = Progress
   { pMeaningOk     :: Bool
   , pReadingNeeded :: Bool
@@ -80,13 +86,15 @@ data AppState = AppState
   , stOverridden   :: Int
   , stMode         :: Mode
   , stBanner       :: Maybe Text
+  , stHasMore      :: Bool
+  , stWantsMore    :: Bool
   }
 
 --------------------------------------------------------------------------------
 -- Entry point
 --------------------------------------------------------------------------------
 
-runStudyTui :: Int -> M.Map Int Int -> [Api.Subject] -> ([Submission] -> IO String) -> IO [Submission]
+runStudyTui :: Int -> M.Map Int Int -> [Api.Subject] -> ([Submission] -> IO SubmitResult) -> IO Bool
 runStudyTui rqAfter subjToAsg subjects submitFn = do
   let queue0 = concatMap mkQuestions subjects
       prog0  = M.fromList [ (Api.subjId s, initProgress s) | s <- subjects ]
@@ -105,18 +113,20 @@ runStudyTui rqAfter subjToAsg subjects submitFn = do
         , stOverridden   = 0
         , stMode         = Normal
         , stBanner       = Nothing
+        , stHasMore      = False
+        , stWantsMore    = False
         }
 
   let buildVty = VCP.mkVty V.defaultConfig
   initialVty <- buildVty
   finalState <- customMain initialVty buildVty Nothing (app submitFn) st0
-  pure (mkSubmissions finalState)
+  pure (stWantsMore finalState)
 
 --------------------------------------------------------------------------------
 -- App
 --------------------------------------------------------------------------------
 
-app :: ([Submission] -> IO String) -> App AppState e Name
+app :: ([Submission] -> IO SubmitResult) -> App AppState e Name
 app submitFn = App
   { appDraw         = drawUi
   , appChooseCursor = neverShowCursor
@@ -190,7 +200,10 @@ drawMain st =
               hintLine =
                 case stMode st of
                   ConfirmSubmit -> str "y/Enter=confirm  n/Esc=cancel"
-                  _ | Just _ <- stBanner st -> str "Press Esc or Ctrl-q to quit."
+                  _ | Just _ <- stBanner st ->
+                        if stHasMore st
+                          then str "Ctrl-n=next batch  Esc=quit"
+                          else str "Esc=quit"
                   _ -> str "Ctrl-s=submit to WaniKani  Esc=quit"
           in vBox
                ( [ withAttr (attrName "ok") $ str "Session finished."
@@ -266,7 +279,7 @@ drawMode st q =
 -- Event handling
 --------------------------------------------------------------------------------
 
-handleEvent :: ([Submission] -> IO String) -> BrickEvent Name e -> EventM Name AppState ()
+handleEvent :: ([Submission] -> IO SubmitResult) -> BrickEvent Name e -> EventM Name AppState ()
 handleEvent submitFn (VtyEvent ev) = do
   st <- get
   case stMode st of
@@ -303,25 +316,11 @@ handleWrongAnswer _ ev =
 
     _ -> pure ()
 
-handleConfirm :: ([Submission] -> IO String) -> V.Event -> EventM Name AppState ()
+handleConfirm :: ([Submission] -> IO SubmitResult) -> V.Event -> EventM Name AppState ()
 handleConfirm submitFn ev =
   case ev of
-    V.EvKey (V.KChar 'y') [] -> do
-      st <- get
-      msg <- liftIO (submitFn (mkSubmissions st))
-      put st
-        { stMode   = Finished
-        , stBanner = Just (T.pack msg)
-        }
-
-    V.EvKey V.KEnter [] -> do
-      st <- get
-      msg <- liftIO (submitFn (mkSubmissions st))
-      put st
-        { stMode   = Finished
-        , stBanner = Just (T.pack msg)
-        }
-
+    V.EvKey (V.KChar 'y') [] -> doSubmit
+    V.EvKey V.KEnter []      -> doSubmit
     V.EvKey (V.KChar 'n') [] -> do
       st <- get
       put st { stMode = Normal }
@@ -331,6 +330,15 @@ handleConfirm submitFn ev =
       put st { stMode = Normal }
 
     _ -> pure ()
+  where
+    doSubmit = do
+      st <- get
+      result <- liftIO (submitFn (mkSubmissions st))
+      put st
+        { stMode    = Finished
+        , stBanner  = Just (T.pack (srMessage result))
+        , stHasMore = srHasMore result
+        }
 
 handleFinished :: V.Event -> EventM Name AppState ()
 handleFinished ev =
@@ -342,6 +350,11 @@ handleFinished ev =
       case stBanner st of
         Nothing -> put st { stMode = ConfirmSubmit }
         Just _  -> pure ()
+    V.EvKey (V.KChar 'n') [V.MCtrl] -> do
+      st <- get
+      if stHasMore st
+        then put st { stWantsMore = True } >> halt
+        else pure ()
     _                               -> pure ()
 
 handleNormal :: V.Event -> EventM Name AppState ()

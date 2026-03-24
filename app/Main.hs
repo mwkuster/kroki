@@ -72,43 +72,43 @@ main = do
     Cli.Study -> do
       let n = fromMaybe 10 batchSize
 
-      now <- getCurrentTime
-      as <- Api.getAvailableAssignments t now n
+          submitBatch subs =
+            if not (Cli.optSubmit opts)
+              then pure (Tui.SubmitResult "Run with --submit to actually commit results." False)
+              else do
+                ts <- getCurrentTime
+                mapM_
+                  (\s ->
+                    Api.createReview t
+                      (Tui.subAssignmentId s)
+                      (Tui.subWrongMeaning s)
+                      (Tui.subWrongReading s)
+                      ts
+                  )
+                  subs
+                now2    <- getCurrentTime
+                summary2 <- Api.getSummary t
+                as2      <- Api.getAvailableAssignments t now2 n
+                pure Tui.SubmitResult
+                  { Tui.srMessage = "Submitted. Reviews available now: "
+                                 <> show (Api.reviewsAvailableNow now2 summary2)
+                  , Tui.srHasMore = not (null as2)
+                  }
 
-      if null as
-        then putStrLn "No reviews available right now."
-        else do
-          let subjectIds = map Api.asSubjectId as
-              subjToAsg  = M.fromList [ (Api.asSubjectId a, Api.asId a) | a <- as ]
+          runBatch = do
+            now <- getCurrentTime
+            as  <- Api.getAvailableAssignments t now n
+            if null as
+              then putStrLn "No reviews available right now."
+              else do
+                let subjectIds = map Api.asSubjectId as
+                    subjToAsg  = M.fromList [ (Api.asSubjectId a, Api.asId a) | a <- as ]
+                subjects <- Api.getSubjectsByIds t subjectIds
+                putStrLn ("Batch: " <> show (length subjects) <> " items (max " <> show n <> ")")
+                wantsMore <- Tui.runStudyTui rqAfter subjToAsg subjects submitBatch
+                if wantsMore then runBatch else pure ()
 
-          subjects <- Api.getSubjectsByIds t subjectIds
-
-          putStrLn ("Batch: " <> show (length subjects) <> " items (max " <> show n <> ")")
-
-          let submitBatch subs =
-                if not (Cli.optSubmit opts)
-                  then pure "Run with --submit to actually commit results."
-                  else do
-                    ts <- getCurrentTime
-                    mapM_
-                      (\s ->
-                        Api.createReview t
-                          (Tui.subAssignmentId s)
-                          (Tui.subWrongMeaning s)
-                          (Tui.subWrongReading s)
-                          ts
-                      )
-                      subs
-
-                    now2 <- getCurrentTime
-                    summary2 <- Api.getSummary t
-                    pure
-                      ( "Submitted. Reviews available now: "
-                     <> show (Api.reviewsAvailableNow now2 summary2)
-                      )
-
-          _subs <- Tui.runStudyTui rqAfter subjToAsg subjects submitBatch
-          pure ()
+      runBatch
 
 padLeft :: Int -> String -> String
 padLeft n s = replicate (max 0 (n - length s)) ' ' <> s
