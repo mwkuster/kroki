@@ -49,12 +49,16 @@ smallTsu t =
 
 -- Handle 'n' as ん when:
 --  - "n'" explicitly
---  - "nn" (consume one n, leave one for next syllable)
+--  - "nn" at end of string → single ん (both n's consumed)
+--  - "nn" + more chars → ん, leave second n for next syllable (e.g. "nna" → んな)
 --  - "n" before a non-vowel and not 'y'
 parseN :: Text -> Maybe Text
 parseN t
   | "n'" `T.isPrefixOf` t = Just (T.drop 2 t)
-  | "nn" `T.isPrefixOf` t = Just (T.drop 1 t)
+  | "nn" `T.isPrefixOf` t =
+      case T.uncons (T.drop 2 t) of
+        Nothing -> Just (T.drop 2 t)  -- "nn" alone → ん
+        Just _  -> Just (T.drop 1 t)  -- "nn…" → ん + second n starts next syllable
   | "n"  `T.isPrefixOf` t =
       case T.uncons (T.drop 1 t) of
         Nothing      -> Just ""          -- trailing n
@@ -161,7 +165,10 @@ liveConvert t
 liveParseN :: Text -> Maybe (Text, Text)
 liveParseN t
   | "n'"  `T.isPrefixOf` t = Just ("ん", T.drop 2 t)
-  | "nn"  `T.isPrefixOf` t = Just ("ん", T.drop 1 t)
+  | "nn"  `T.isPrefixOf` t =
+      case T.uncons (T.drop 2 t) of
+        Nothing -> Just ("ん", T.drop 2 t)  -- "nn" alone → ん
+        Just _  -> Just ("ん", T.drop 1 t)  -- "nn…" → ん + second n starts next syllable
   | "n"   `T.isPrefixOf` t =
       case T.uncons (T.drop 1 t) of
         Nothing     -> Nothing   -- trailing n: keep as pending
