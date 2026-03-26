@@ -86,10 +86,22 @@ executable kroki
 test-suite kroki-test
     type:             exitcode-stdio-1.0
     main-is:          Spec.hs
-    hs-source-dirs:   test, app
-    other-modules:    Romaji
+    hs-source-dirs:   test, app, src
+    other-modules:    Romaji, Tui, Api, Config, TuiSpec
     default-language: GHC2021
     build-depends:
         base >=4.16 && <5
       , text
+      , containers
       , hspec
+      , aeson
+      , bytestring
+      , req
+      , time
+      , directory
+      , filepath
+      , random
+      , brick
+      , vty
+      , vty-crossplatform
+      , vector

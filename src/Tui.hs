@@ -7,6 +7,17 @@ module Tui
   , QKind(..)
   , Q(..)
   , Progress(..)
+  , AppState(..)
+  , Mode(..)
+  , Name(..)
+  , checkAnswer
+  , normMeaning
+  , normReading
+  , mkSubmissions
+  , requeueAfterK
+  , initProgress
+  , markOk
+  , incWrong
   ) where
 
 import qualified Api
@@ -38,7 +49,7 @@ data QKind = QMeaning | QReading
 data Q = Q
   { qSubject :: Api.Subject
   , qKind    :: QKind
-  } deriving (Show)
+  } deriving (Show, Eq)
 
 data Submission = Submission
   { subAssignmentId :: Int

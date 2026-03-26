@@ -4,9 +4,11 @@ module Main (main) where
 
 import Test.Hspec
 import qualified Romaji
+import qualified TuiSpec
 
 main :: IO ()
 main = hspec $ do
+  TuiSpec.spec
 
   describe "romajiToHiragana" $ do
 
