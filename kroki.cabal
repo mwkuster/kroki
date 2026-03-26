@@ -82,3 +82,14 @@ executable kroki
       , text
       , containers
       , vty-crossplatform
+
+test-suite kroki-test
+    type:             exitcode-stdio-1.0
+    main-is:          Spec.hs
+    hs-source-dirs:   test, app
+    other-modules:    Romaji
+    default-language: GHC2021
+    build-depends:
+        base >=4.16 && <5
+      , text
+      , hspec
