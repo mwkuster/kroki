@@ -13,11 +13,12 @@ data Command
   deriving (Show, Eq)
 
 data Options = Options
-  { optToken   :: Maybe String
-  , optBatchSize :: Maybe Int
+  { optToken        :: Maybe String
+  , optBatchSize    :: Maybe Int
   , optRequeueAfter :: Maybe Int
-  , optSubmit  :: Bool
-  , optCommand :: Command
+  , optSubmit       :: Bool
+  , optVerbose      :: Bool
+  , optCommand      :: Command
   } deriving (Show, Eq)
 
 parseCli :: IO Options
@@ -38,6 +39,7 @@ optionsParser =
     <*> optional batchSizeOption
     <*> optional requeueAfterOption
     <*> submitSwitch
+    <*> verboseSwitch
     <*> commandParser
 
 tokenOption :: Parser String
@@ -67,6 +69,13 @@ submitSwitch =
   switch
     ( long "submit"
    <> help "Submit completed reviews to WaniKani at the end of the session" )
+
+verboseSwitch :: Parser Bool
+verboseSwitch =
+  switch
+    ( long "verbose"
+   <> short 'v'
+   <> help "Print informational log messages" )
 
 commandParser :: Parser Command
 commandParser =
