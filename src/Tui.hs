@@ -665,12 +665,14 @@ playAudio :: Maybe String -> Api.Subject -> IO ()
 playAudio Nothing _ = pure ()
 playAudio (Just cmd) subj =
   case Api.subjAudioUrls subj of
-    []      -> pure ()
-    (url:_) ->
-      let parts = case words cmd of { [] -> ["mpv"]; ws -> ws }
+    [] -> pure ()
+    urls -> do
+      i <- randomRIO (0, length urls - 1)
+      let url   = urls !! i
+          parts = case words cmd of { [] -> ["mpv"]; ws -> ws }
           exe   = head parts
           args  = tail parts
-      in void $ spawnProcess exe (args ++ [T.unpack url])
+      void $ spawnProcess exe (args ++ [T.unpack url])
 
 normMeaning :: Text -> Text
 normMeaning = collapseSpaces . T.toCaseFold . T.strip
