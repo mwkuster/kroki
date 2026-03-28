@@ -15,6 +15,7 @@ module Tui
   , normReading
   , mkSubmissions
   , requeueAfterK
+  , requeueOnly
   , initProgress
   , markOk
   , incWrong
@@ -242,7 +243,7 @@ drawMain st =
                 drawMode st q
             , padTop (Pad 1) $
                 withAttr (attrName "hint") $
-                  str "Enter=submit answer  Ctrl-o=override  Ctrl-b=requeue  Ctrl-s=submit batch  Esc=quit"
+                  str "Enter=submit answer  Ctrl-o=override  Ctrl-r=requeue  Ctrl-s=submit batch  Esc=quit"
             ]
 
 drawMode :: AppState -> Q -> Widget Name
@@ -257,7 +258,7 @@ drawMode st q =
             txt ("✗ accepted: " <> T.pack (intercalate ", " expected))
         , padTop (Pad 1) $
             withAttr (attrName "hint") $
-              str "Ctrl-o=override as correct  Ctrl-b=requeue later  Enter=requeue"
+              str "Ctrl-o=override correct  Ctrl-r=requeue (no penalty)  Enter=requeue (wrong)"
         ]
 
     Feedback msg ->
@@ -309,11 +310,11 @@ handleWrongAnswer _ ev =
         Nothing -> pure ()
         Just q  -> put (advanceOverride q st { stMode = Normal })
 
-    V.EvKey (V.KChar 'b') [V.MCtrl] -> do
+    V.EvKey (V.KChar 'r') [V.MCtrl] -> do
       st <- get
       case currentQuestion st of
         Nothing -> pure ()
-        Just q  -> put (requeueWrong q st { stMode = Normal })
+        Just q  -> put (requeueOnly q st { stMode = Normal })
 
     V.EvKey V.KEnter [] -> do
       st <- get
@@ -384,11 +385,11 @@ handleNormal ev =
         Nothing -> pure ()
         Just q  -> put (advanceOverride q st)
 
-    V.EvKey (V.KChar 'b') [V.MCtrl] -> do
+    V.EvKey (V.KChar 'r') [V.MCtrl] -> do
       st <- get
       case currentQuestion st of
         Nothing -> pure ()
-        Just q  -> put (requeueWrong q st)
+        Just q  -> put (requeueOnly q st)
 
     V.EvKey V.KEsc [] ->
       halt
@@ -479,6 +480,17 @@ requeueWrong q st =
      , stQueueWidget = mkQueueWidget queue'
      , stProgress    = prog'
      , stWrong       = stWrong st + 1
+     , stInput       = T.empty
+     , stMode        = Feedback "requeued"
+     }
+
+-- | Requeue without recording a wrong answer (no penalty to wrong counts).
+requeueOnly :: Q -> AppState -> AppState
+requeueOnly q st =
+  let queue' = requeueAfterK (stRequeueAfter st) q (drop 1 (stQueue st))
+  in st
+     { stQueue       = queue'
+     , stQueueWidget = mkQueueWidget queue'
      , stInput       = T.empty
      , stMode        = Feedback "requeued"
      }

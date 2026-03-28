@@ -128,6 +128,36 @@ spec = do
     it "empty queue returns singleton" $
       Tui.requeueAfterK 3 q0 [] `shouldBe` [q0]
 
+  describe "requeueOnly" $ do
+    let q0   = mkQ kanjiSubj Tui.QMeaning
+        qs   = map (\n -> mkQ (kanjiSubj { Api.subjId = n }) Tui.QMeaning) [2..4]
+        st0  = (stateWith (M.singleton 1 (Tui.initProgress kanjiSubj)) M.empty)
+                 { Tui.stQueue        = q0 : qs
+                 , Tui.stQueueWidget  = L.list Tui.QueueList (Vec.fromList (q0 : qs)) 1
+                 , Tui.stRequeueAfter = 2
+                 , Tui.stWrong        = 0
+                 }
+
+    it "does not increment wrong count" $ do
+      let st' = Tui.requeueOnly q0 st0
+      Tui.stWrong st' `shouldBe` 0
+
+    it "does not increment pMeaningWrong" $ do
+      let st' = Tui.requeueOnly q0 st0
+      Tui.pMeaningWrong (Tui.stProgress st' M.! 1) `shouldBe` 0
+
+    it "removes item from front of queue" $ do
+      let st' = Tui.requeueOnly q0 st0
+      Api.subjId (Tui.qSubject (head (Tui.stQueue st'))) `shouldBe` 2
+
+    it "reinserts item at requeue position" $ do
+      let st' = Tui.requeueOnly q0 st0
+      map (Api.subjId . Tui.qSubject) (Tui.stQueue st') `shouldBe` [2, 3, 1, 4]
+
+    it "clears input" $ do
+      let st' = Tui.requeueOnly q0 st0 { Tui.stInput = "foo" }
+      Tui.stInput st' `shouldBe` ""
+
   describe "initProgress" $ do
     it "kanji needs reading" $
       Tui.pReadingNeeded (Tui.initProgress kanjiSubj) `shouldBe` True

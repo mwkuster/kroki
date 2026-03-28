@@ -41,7 +41,7 @@ This is a WaniKani (kanji/vocabulary SRS) CLI+TUI app. The study flow:
 ### TUI Keybindings
 - `Enter` — submit answer
 - `Ctrl-o` — override as correct
-- `Ctrl-b` — requeue question later
+- `Ctrl-r` — requeue question later (no penalty)
 - `Ctrl-s` — submit batch to WaniKani
 - `Esc`/`Ctrl-q` — quit
 
