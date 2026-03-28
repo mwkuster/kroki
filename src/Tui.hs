@@ -246,11 +246,11 @@ drawMain st =
                 drawMode st q
             , padTop (Pad 1) $
                 withAttr (attrName "hint") $
-                  str (normalHint q st)
+                  normalHintWidget q st
             ]
 
 drawMode :: AppState -> Q -> Widget Name
-drawMode st _q =
+drawMode st q =
   case stMode st of
     Normal ->
       emptyWidget
@@ -261,7 +261,8 @@ drawMode st _q =
             txt ("✗ accepted: " <> T.pack (intercalate ", " expected))
         , padTop (Pad 1) $
             withAttr (attrName "hint") $
-              str "Ctrl-o=override correct  Ctrl-r=requeue (no penalty)  Enter=requeue (wrong)"
+              vBox $ [ str "Ctrl-o=override correct  Ctrl-r=requeue (no penalty)  Enter=requeue (wrong)" ]
+                  ++ [ str "Ctrl-p=play audio" | hasAudio q st ]
         ]
 
     Feedback msg ->
@@ -322,8 +323,7 @@ handleWrongAnswer _ ev =
     V.EvKey (V.KChar 'p') [V.MCtrl] -> do
       st <- get
       case currentQuestion st of
-        Just q | qKind q == QReading ->
-          liftIO $ playAudio (stAudioPlayer st) (qSubject q)
+        Just q | hasAudio q st -> liftIO $ playAudio (stAudioPlayer st) (qSubject q)
         _ -> pure ()
 
     V.EvKey V.KEnter [] -> do
@@ -404,8 +404,7 @@ handleNormal ev =
     V.EvKey (V.KChar 'p') [V.MCtrl] -> do
       st <- get
       case currentQuestion st of
-        Just q | qKind q == QReading ->
-          liftIO $ playAudio (stAudioPlayer st) (qSubject q)
+        Just q | hasAudio q st -> liftIO $ playAudio (stAudioPlayer st) (qSubject q)
         _ -> pure ()
 
     V.EvKey V.KEsc [] ->
@@ -637,13 +636,19 @@ displayInput :: QKind -> Text -> Text
 displayInput QReading t = Romaji.romajiToHiraganaLive t
 displayInput QMeaning t = t
 
-normalHint :: Q -> AppState -> String
-normalHint q st =
-  let base = "Enter=submit  Ctrl-o=override  Ctrl-r=requeue  Ctrl-s=submit batch  Esc=quit"
-      hasAudio = qKind q == QReading
-              && not (null (Api.subjAudioUrls (qSubject q)))
-              && stAudioPlayer st /= Nothing
-  in if hasAudio then base <> "  Ctrl-p=play audio" else base
+hasAudio :: Q -> AppState -> Bool
+hasAudio q st =
+  not (null (Api.subjAudioUrls (qSubject q))) && stAudioPlayer st /= Nothing
+
+normalHintWidget :: Q -> AppState -> Widget Name
+normalHintWidget q st =
+  vBox $ [ str "Enter=submit  Ctrl-o=override  Ctrl-r=requeue  Esc=quit"
+         , str "Ctrl-s=submit batch" <+> audioHint
+         ]
+  where
+    audioHint
+      | hasAudio q st = str "  Ctrl-p=play audio"
+      | otherwise     = emptyWidget
 
 -- | Fire-and-forget audio playback via configured external player.
 playAudio :: Maybe String -> Api.Subject -> IO ()
