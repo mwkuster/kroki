@@ -28,7 +28,6 @@ import Brick
 import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.Center as C
 import qualified Brick.Widgets.List as L
-import Brick.Util (fg, on)
 import qualified Graphics.Vty as V
 import qualified Graphics.Vty.CrossPlatform as VCP
 
@@ -247,7 +246,7 @@ drawMain st =
             ]
 
 drawMode :: AppState -> Q -> Widget Name
-drawMode st q =
+drawMode st _q =
   case stMode st of
     Normal ->
       emptyWidget
@@ -570,8 +569,9 @@ shuffle xs = go xs []
     go [] acc = pure acc
     go ys acc = do
       i <- randomRIO (0, length ys - 1)
-      let (front, a:back) = splitAt i ys
-      go (front ++ back) (a : acc)
+      case splitAt i ys of
+        (front, a:back) -> go (front ++ back) (a : acc)
+        _               -> pure acc
 
 --------------------------------------------------------------------------------
 -- Answer checking / display
@@ -592,11 +592,6 @@ checkAnswer (Q subj kind) ans =
          , map T.unpack rs
          )
 
-acceptedPreview :: Q -> Text
-acceptedPreview (Q subj kind) =
-  case kind of
-    QMeaning -> T.intercalate ", " (Api.subjMeanings subj)
-    QReading -> T.intercalate ", " (acceptedReadings subj)
 
 displayItem :: Api.Subject -> String
 displayItem s =

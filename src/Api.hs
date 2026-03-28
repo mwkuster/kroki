@@ -25,7 +25,6 @@ import Data.Aeson (FromJSON(..), (.:), (.:?), Object, withObject)
 import Data.Aeson.Types (Parser)
 import qualified Data.Aeson.Key as Key
 import Data.Aeson (object, (.=))
-import Data.Char (isSpace)
 import Data.List (sortOn)
 import Data.Maybe (catMaybes)
 import Data.Text (Text)

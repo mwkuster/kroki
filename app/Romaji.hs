@@ -5,9 +5,8 @@ module Romaji
   , romajiToHiraganaLive
   ) where
 
-import Data.Char (isAlpha, toLower)
+import Data.Char (isAlpha)
 import Data.List (find)
-import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 

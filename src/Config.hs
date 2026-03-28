@@ -7,7 +7,6 @@ module Config
 
 import Control.Exception (IOException, catch)
 import Data.Char (isSpace)
-import Data.List (isPrefixOf)
 import System.Directory (getXdgDirectory, XdgDirectory(XdgConfig))
 import System.FilePath ((</>))
 
