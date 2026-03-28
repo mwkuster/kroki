@@ -82,7 +82,7 @@ data Name = QueueList
 
 data Mode
   = Normal
-  | WrongAnswer [String]
+  | WrongAnswer Text [String]  -- user's input, accepted answers
   | Feedback Text
   | ConfirmSubmit
   | Finished
@@ -264,10 +264,12 @@ drawMode st q =
     Normal ->
       emptyWidget
 
-    WrongAnswer expected ->
+    WrongAnswer input expected ->
       vBox
         [ withAttr (attrName "bad") $
-            txt ("✗ accepted: " <> T.pack (intercalate ", " expected))
+            txt ("✗ you entered: " <> input)
+        , withAttr (attrName "ok") $
+            txt ("✓ accepted:    " <> T.pack (intercalate ", " expected))
         , padTop (Pad 1) $
             withAttr (attrName "hint") $
               vBox $ [ str "Ctrl-o=override correct  Ctrl-r=requeue (no penalty)  Enter=requeue (wrong)" ]
@@ -308,14 +310,14 @@ handleEvent :: ([Submission] -> IO SubmitResult) -> BrickEvent Name e -> EventM 
 handleEvent submitFn (VtyEvent ev) = do
   st <- get
   case stMode st of
-    WrongAnswer expected -> handleWrongAnswer expected ev
-    ConfirmSubmit        -> handleConfirm submitFn ev
-    Finished             -> handleFinished ev
-    _                    -> handleNormal ev
+    WrongAnswer _ _ -> handleWrongAnswer ev
+    ConfirmSubmit   -> handleConfirm submitFn ev
+    Finished        -> handleFinished ev
+    _               -> handleNormal ev
 handleEvent _ _ = pure ()
 
-handleWrongAnswer :: [String] -> V.Event -> EventM Name AppState ()
-handleWrongAnswer _ ev =
+handleWrongAnswer :: V.Event -> EventM Name AppState ()
+handleWrongAnswer ev =
   case ev of
     V.EvKey (V.KChar 'o') [V.MCtrl] -> do
       st <- get
@@ -467,7 +469,7 @@ submitAnswer q answer st =
        then advanceCorrect q st
        else st
           { stInput = T.empty
-          , stMode  = WrongAnswer expected
+          , stMode  = WrongAnswer answer expected
           }
 
 advanceCorrect :: Q -> AppState -> AppState
