@@ -265,9 +265,12 @@ drawMode st q =
       emptyWidget
 
     WrongAnswer input expected ->
-      vBox
+      let shownInput = case qKind q of
+            QReading -> normReading input
+            QMeaning -> input
+      in vBox
         [ withAttr (attrName "bad") $
-            txt ("✗ you entered: " <> input)
+            txt ("✗ you entered: " <> shownInput)
         , withAttr (attrName "ok") $
             txt ("✓ accepted:    " <> T.pack (intercalate ", " expected))
         , padTop (Pad 1) $
