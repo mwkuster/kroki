@@ -62,6 +62,7 @@ data Submission = Submission
 data SubmitResult = SubmitResult
   { srMessage :: String
   , srHasMore :: Bool
+  , srDetails :: [String]   -- per-submission lines for TUI display
   } deriving (Show)
 
 data Progress = Progress
@@ -102,6 +103,7 @@ data AppState = AppState
   , stHasMore      :: Bool
   , stWantsMore    :: Bool
   , stAudioPlayer  :: Maybe String  -- command to play audio (e.g. "mpv --really-quiet")
+  , stSubmitDetails :: [String]     -- per-submission lines shown after submit
   }
 
 --------------------------------------------------------------------------------
@@ -125,11 +127,12 @@ runStudyTui rqAfter audioPlayer subjToAsg subjects submitFn = do
         , stCorrect      = 0
         , stWrong        = 0
         , stOverridden   = 0
-        , stMode         = Normal
-        , stBanner       = Nothing
-        , stHasMore      = False
-        , stWantsMore    = False
-        , stAudioPlayer  = audioPlayer
+        , stMode          = Normal
+        , stBanner        = Nothing
+        , stHasMore       = False
+        , stWantsMore     = False
+        , stAudioPlayer   = audioPlayer
+        , stSubmitDetails = []
         }
 
   let buildVty = VCP.mkVty V.defaultConfig
@@ -208,6 +211,11 @@ drawMain st =
                        , str ("Items with mistakes: " <> show withMistakes)
                        ]
                   _ -> []
+              detailWidgets =
+                case stSubmitDetails st of
+                  [] -> []
+                  ds -> padTop (Pad 1) (withAttr (attrName "hint") (str "--- submitted ---"))
+                      : map (withAttr (attrName "hint") . str) ds
               bannerWidgets =
                 case stBanner st of
                   Just msg -> [padTop (Pad 1) (txt msg)]
@@ -228,6 +236,7 @@ drawMain st =
                  , str ("submissions: " <> show (length (mkSubmissions st)))
                  ]
               ++ confirmWidgets
+              ++ detailWidgets
               ++ bannerWidgets
               ++ [ padTop (Pad 1) hintLine ]
                )
@@ -357,9 +366,10 @@ handleConfirm submitFn ev =
       st <- get
       result <- liftIO (submitFn (mkSubmissions st))
       put st
-        { stMode    = Finished
-        , stBanner  = Just (T.pack (srMessage result))
-        , stHasMore = srHasMore result
+        { stMode          = Finished
+        , stBanner        = Just (T.pack (srMessage result))
+        , stHasMore       = srHasMore result
+        , stSubmitDetails = srDetails result
         }
 
 handleFinished :: V.Event -> EventM Name AppState ()
@@ -657,7 +667,9 @@ playAudio (Just cmd) subj =
   case Api.subjAudioUrls subj of
     []      -> pure ()
     (url:_) ->
-      let (exe:args) = case words cmd of { [] -> ["mpv"]; ws -> ws }
+      let parts = case words cmd of { [] -> ["mpv"]; ws -> ws }
+          exe   = head parts
+          args  = tail parts
       in void $ spawnProcess exe (args ++ [T.unpack url])
 
 normMeaning :: Text -> Text

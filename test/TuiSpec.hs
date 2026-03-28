@@ -66,7 +66,8 @@ stateWith prog subjToAsg = Tui.AppState
   , Tui.stBanner       = Nothing
   , Tui.stHasMore      = False
   , Tui.stWantsMore    = False
-  , Tui.stAudioPlayer  = Nothing
+  , Tui.stAudioPlayer   = Nothing
+  , Tui.stSubmitDetails = []
   }
 
 --------------------------------------------------------------------------------

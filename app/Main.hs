@@ -98,11 +98,13 @@ main = do
 
           submitBatch asgToSubj subs =
             do
-              when verbose $ do
-                putStrLn "--- submissions ---"
-                mapM_ (printSub asgToSubj) subs
+              let details = map (fmtSub asgToSubj) subs
               if not (Cli.optSubmit opts)
-                then pure (Tui.SubmitResult "Run with --submit to actually commit results." False)
+                then pure Tui.SubmitResult
+                  { Tui.srMessage = "Run with --submit to actually commit results."
+                  , Tui.srHasMore = False
+                  , Tui.srDetails = details
+                  }
                 else do
                   ts <- getCurrentTime
                   mapM_
@@ -121,12 +123,13 @@ main = do
                     { Tui.srMessage = "Submitted. Reviews available now: "
                                    <> show (Api.reviewsAvailableNow now2 summary2)
                     , Tui.srHasMore = not (null as2)
+                    , Tui.srDetails = details
                     }
 
       runBatch
 
-printSub :: M.Map Int Api.Subject -> Tui.Submission -> IO ()
-printSub asgToSubj s = do
+fmtSub :: M.Map Int Api.Subject -> Tui.Submission -> String
+fmtSub asgToSubj s =
   let name = case M.lookup (Tui.subAssignmentId s) asgToSubj of
                Just subj -> subjLabel subj
                Nothing   -> "assignment #" <> show (Tui.subAssignmentId s)
@@ -136,7 +139,7 @@ printSub asgToSubj s = do
         | otherwise = "incorrect"
                    <> " (meaning wrong: " <> show (Tui.subWrongMeaning s)
                    <> ", reading wrong: " <> show (Tui.subWrongReading s) <> ")"
-  putStrLn (padRight 30 name <> "  " <> status)
+  in padRight 30 name <> "  " <> status
 
 subjLabel :: Api.Subject -> String
 subjLabel subj =
