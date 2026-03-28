@@ -31,12 +31,14 @@ import qualified Brick.Widgets.List as L
 import qualified Graphics.Vty as V
 import qualified Graphics.Vty.CrossPlatform as VCP
 
+import Control.Monad (void)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Map.Strict as M
 import qualified Data.Vector as Vec
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.List (intercalate)
+import System.Process (spawnProcess)
 import System.Random (randomRIO)
 
 --------------------------------------------------------------------------------
@@ -99,14 +101,15 @@ data AppState = AppState
   , stBanner       :: Maybe Text
   , stHasMore      :: Bool
   , stWantsMore    :: Bool
+  , stAudioPlayer  :: Maybe String  -- command to play audio (e.g. "mpv --really-quiet")
   }
 
 --------------------------------------------------------------------------------
 -- Entry point
 --------------------------------------------------------------------------------
 
-runStudyTui :: Int -> M.Map Int Int -> [Api.Subject] -> ([Submission] -> IO SubmitResult) -> IO Bool
-runStudyTui rqAfter subjToAsg subjects submitFn = do
+runStudyTui :: Int -> Maybe String -> M.Map Int Int -> [Api.Subject] -> ([Submission] -> IO SubmitResult) -> IO Bool
+runStudyTui rqAfter audioPlayer subjToAsg subjects submitFn = do
   let queue0 = concatMap mkQuestions subjects
       prog0  = M.fromList [ (Api.subjId s, initProgress s) | s <- subjects ]
 
@@ -126,6 +129,7 @@ runStudyTui rqAfter subjToAsg subjects submitFn = do
         , stBanner       = Nothing
         , stHasMore      = False
         , stWantsMore    = False
+        , stAudioPlayer  = audioPlayer
         }
 
   let buildVty = VCP.mkVty V.defaultConfig
@@ -242,7 +246,7 @@ drawMain st =
                 drawMode st q
             , padTop (Pad 1) $
                 withAttr (attrName "hint") $
-                  str "Enter=submit answer  Ctrl-o=override  Ctrl-r=requeue  Ctrl-s=submit batch  Esc=quit"
+                  str (normalHint q st)
             ]
 
 drawMode :: AppState -> Q -> Widget Name
@@ -314,6 +318,13 @@ handleWrongAnswer _ ev =
       case currentQuestion st of
         Nothing -> pure ()
         Just q  -> put (requeueOnly q st { stMode = Normal })
+
+    V.EvKey (V.KChar 'p') [V.MCtrl] -> do
+      st <- get
+      case currentQuestion st of
+        Just q | qKind q == QReading ->
+          liftIO $ playAudio (stAudioPlayer st) (qSubject q)
+        _ -> pure ()
 
     V.EvKey V.KEnter [] -> do
       st <- get
@@ -389,6 +400,13 @@ handleNormal ev =
       case currentQuestion st of
         Nothing -> pure ()
         Just q  -> put (requeueOnly q st)
+
+    V.EvKey (V.KChar 'p') [V.MCtrl] -> do
+      st <- get
+      case currentQuestion st of
+        Just q | qKind q == QReading ->
+          liftIO $ playAudio (stAudioPlayer st) (qSubject q)
+        _ -> pure ()
 
     V.EvKey V.KEsc [] ->
       halt
@@ -618,6 +636,24 @@ kindLabel QReading = "reading"
 displayInput :: QKind -> Text -> Text
 displayInput QReading t = Romaji.romajiToHiraganaLive t
 displayInput QMeaning t = t
+
+normalHint :: Q -> AppState -> String
+normalHint q st =
+  let base = "Enter=submit  Ctrl-o=override  Ctrl-r=requeue  Ctrl-s=submit batch  Esc=quit"
+      hasAudio = qKind q == QReading
+              && not (null (Api.subjAudioUrls (qSubject q)))
+              && stAudioPlayer st /= Nothing
+  in if hasAudio then base <> "  Ctrl-p=play audio" else base
+
+-- | Fire-and-forget audio playback via configured external player.
+playAudio :: Maybe String -> Api.Subject -> IO ()
+playAudio Nothing _ = pure ()
+playAudio (Just cmd) subj =
+  case Api.subjAudioUrls subj of
+    []      -> pure ()
+    (url:_) ->
+      let (exe:args) = case words cmd of { [] -> ["mpv"]; ws -> ws }
+      in void $ spawnProcess exe (args ++ [T.unpack url])
 
 normMeaning :: Text -> Text
 normMeaning = collapseSpaces . T.toCaseFold . T.strip

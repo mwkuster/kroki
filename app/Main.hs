@@ -92,7 +92,8 @@ main = do
                       , Just asgId <- [M.lookup (Api.subjId subj) subjToAsg]
                       ]
                 logInfo ("Batch: " <> show (length subjects) <> " items (max " <> show n <> ")")
-                wantsMore <- Tui.runStudyTui rqAfter subjToAsg subjects (submitBatch asgToSubj)
+                let audioPlayer = Config.cfgAudioPlayer cfg
+                wantsMore <- Tui.runStudyTui rqAfter audioPlayer subjToAsg subjects (submitBatch asgToSubj)
                 if wantsMore then runBatch else pure ()
 
           submitBatch asgToSubj subs =

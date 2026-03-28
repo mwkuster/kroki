@@ -246,11 +246,12 @@ data SubjectType = Radical | Kanji | Vocabulary | KanaVocabulary
   deriving (Show, Eq)
 
 data Subject = Subject
-  { subjId       :: Int
-  , subjType     :: SubjectType
-  , subjChars    :: Maybe Text
-  , subjMeanings :: [Text]   -- accepted meanings
-  , subjReadings :: [Text]   -- accepted readings (kana/romaji depending on type)
+  { subjId         :: Int
+  , subjType       :: SubjectType
+  , subjChars      :: Maybe Text
+  , subjMeanings   :: [Text]   -- accepted meanings
+  , subjReadings   :: [Text]   -- accepted readings (kana/romaji depending on type)
+  , subjAudioUrls  :: [Text]   -- pronunciation audio URLs (vocab only)
   } deriving (Show, Eq)
 
 newtype SubjectsEnvelope = SubjectsEnvelope { suData :: [Subject] } deriving (Show)
@@ -258,6 +259,11 @@ newtype SubjectsEnvelope = SubjectsEnvelope { suData :: [Subject] } deriving (Sh
 instance FromJSON SubjectsEnvelope where
   parseJSON = withObject "SubjectsEnvelope" $ \o ->
     SubjectsEnvelope <$> o .: "data"
+
+newtype PronAudio = PronAudio { paUrl :: Text }
+
+instance FromJSON PronAudio where
+  parseJSON = withObject "PronAudio" $ \o -> PronAudio <$> o .: "url"
 
 instance FromJSON Subject where
   parseJSON = withObject "Subject" $ \o -> do
@@ -273,12 +279,18 @@ instance FromJSON Subject where
       Radical        -> pure []
       _              -> (d .:? "readings" >>= maybe (pure []) (parseAccepted "reading"))
 
+    audioUrls <- case st of
+      Vocabulary     -> maybe [] (map paUrl) <$> (d .:? "pronunciation_audios")
+      KanaVocabulary -> maybe [] (map paUrl) <$> (d .:? "pronunciation_audios")
+      _              -> pure []
+
     pure Subject
-      { subjId       = sid
-      , subjType     = st
-      , subjChars    = chars
-      , subjMeanings = meanings
-      , subjReadings = readings
+      { subjId        = sid
+      , subjType      = st
+      , subjChars     = chars
+      , subjMeanings  = meanings
+      , subjReadings  = readings
+      , subjAudioUrls = audioUrls
       }
 
 parseSubjectType :: Text -> Parser SubjectType

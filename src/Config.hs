@@ -14,6 +14,7 @@ data KrokiConfig = KrokiConfig
   { cfgToken :: Maybe String
   , cfgBatchSize :: Maybe Int
   , cfgRequeueAfter :: Maybe Int
+  , cfgAudioPlayer :: Maybe String
   } deriving (Show, Eq)
 
 -- Loads ~/.config/kroki/config (via XDG)
@@ -27,10 +28,12 @@ loadConfig = do
 parseConfig :: String -> KrokiConfig
 parseConfig s =
   KrokiConfig
-    { cfgToken = lookupKey "token" (lines s)
-    , cfgBatchSize = lookupInt "batch_size" (lines s)
-    , cfgRequeueAfter = lookupInt "requeue_after" (lines s)
+    { cfgToken        = lookupKey "token"        ls
+    , cfgBatchSize    = lookupInt "batch_size"   ls
+    , cfgRequeueAfter = lookupInt "requeue_after" ls
+    , cfgAudioPlayer  = lookupKey "audio_player" ls
     }
+  where ls = lines s
 
 lookupKey :: String -> [String] -> Maybe String
 lookupKey key ls =

@@ -17,31 +17,34 @@ import qualified Tui
 -- Minimal kanji subject for testing
 kanjiSubj :: Api.Subject
 kanjiSubj = Api.Subject
-  { Api.subjId       = 1
-  , Api.subjType     = Api.Kanji
-  , Api.subjChars    = Just "日"
-  , Api.subjMeanings = ["Sun", "Day"]
-  , Api.subjReadings = ["にち", "じつ"]
+  { Api.subjId        = 1
+  , Api.subjType      = Api.Kanji
+  , Api.subjChars     = Just "日"
+  , Api.subjMeanings  = ["Sun", "Day"]
+  , Api.subjReadings  = ["にち", "じつ"]
+  , Api.subjAudioUrls = []
   }
 
 -- Radical (no reading question)
 radicalSubj :: Api.Subject
 radicalSubj = Api.Subject
-  { Api.subjId       = 2
-  , Api.subjType     = Api.Radical
-  , Api.subjChars    = Just "一"
-  , Api.subjMeanings = ["One"]
-  , Api.subjReadings = []
+  { Api.subjId        = 2
+  , Api.subjType      = Api.Radical
+  , Api.subjChars     = Just "一"
+  , Api.subjMeanings  = ["One"]
+  , Api.subjReadings  = []
+  , Api.subjAudioUrls = []
   }
 
 -- Vocab subject
 vocabSubj :: Api.Subject
 vocabSubj = Api.Subject
-  { Api.subjId       = 3
-  , Api.subjType     = Api.Vocabulary
-  , Api.subjChars    = Just "学校"
-  , Api.subjMeanings = ["School"]
-  , Api.subjReadings = ["がっこう"]
+  { Api.subjId        = 3
+  , Api.subjType      = Api.Vocabulary
+  , Api.subjChars     = Just "学校"
+  , Api.subjMeanings  = ["School"]
+  , Api.subjReadings  = ["がっこう"]
+  , Api.subjAudioUrls = []
   }
 
 mkQ :: Api.Subject -> Tui.QKind -> Tui.Q
@@ -63,6 +66,7 @@ stateWith prog subjToAsg = Tui.AppState
   , Tui.stBanner       = Nothing
   , Tui.stHasMore      = False
   , Tui.stWantsMore    = False
+  , Tui.stAudioPlayer  = Nothing
   }
 
 --------------------------------------------------------------------------------

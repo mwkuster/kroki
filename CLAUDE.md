@@ -20,9 +20,12 @@ Config file format (`~/.config/kroki/config`):
 token=<your-api-token>
 batch_size=10
 requeue_after=7
+audio_player=mpv --really-quiet
 ```
 
-There are no automated tests.
+`audio_player` is optional. If set, Ctrl-p plays the WaniKani pronunciation audio during reading questions (vocabulary only). The URL is appended as the last argument to the command.
+
+Run tests: `cabal test`
 
 ## Architecture
 
@@ -42,6 +45,7 @@ This is a WaniKani (kanji/vocabulary SRS) CLI+TUI app. The study flow:
 - `Enter` — submit answer
 - `Ctrl-o` — override as correct
 - `Ctrl-r` — requeue question later (no penalty)
+- `Ctrl-p` — play pronunciation audio (reading questions on vocabulary, requires `audio_player` in config)
 - `Ctrl-s` — submit batch to WaniKani
 - `Esc`/`Ctrl-q` — quit
 
