@@ -47,15 +47,16 @@ main = hspec $ do
       it "ryu → りゅ" $ Romaji.romajiToHiragana "ryu" `shouldBe` "りゅ"
 
     describe "ん (n)" $ do
-      it "n' → ん"              $ Romaji.romajiToHiragana "n'"    `shouldBe` "ん"
-      it "nn → ん (not んん)"   $ Romaji.romajiToHiragana "nn"    `shouldBe` "ん"
-      it "trailing n → ん"      $ Romaji.romajiToHiragana "n"     `shouldBe` "ん"
-      it "n before consonant"   $ Romaji.romajiToHiragana "nka"   `shouldBe` "んか"
-      it "nn before vowel (nna)"$ Romaji.romajiToHiragana "nna"   `shouldBe` "んな"
-      it "n before vowel stays" $ Romaji.romajiToHiragana "na"    `shouldBe` "な"
-      it "kanna → かんな"       $ Romaji.romajiToHiragana "kanna" `shouldBe` "かんな"
-      it "denwa → でんわ"       $ Romaji.romajiToHiragana "denwa" `shouldBe` "でんわ"
-      it "n'a → んあ"           $ Romaji.romajiToHiragana "n'a"   `shouldBe` "んあ"
+      it "n' → ん"              $ Romaji.romajiToHiragana "n'"     `shouldBe` "ん"
+      it "nn → ん (not んん)"   $ Romaji.romajiToHiragana "nn"     `shouldBe` "ん"
+      it "trailing n → ん"      $ Romaji.romajiToHiragana "n"      `shouldBe` "ん"
+      it "n before consonant"   $ Romaji.romajiToHiragana "nka"    `shouldBe` "んか"
+      it "nn before vowel (nna)"$ Romaji.romajiToHiragana "nna"    `shouldBe` "んな"
+      it "n before vowel stays" $ Romaji.romajiToHiragana "na"     `shouldBe` "な"
+      it "kanna → かんな"       $ Romaji.romajiToHiragana "kanna"  `shouldBe` "かんな"
+      it "denwa → でんわ"       $ Romaji.romajiToHiragana "denwa"  `shouldBe` "でんわ"
+      it "dennwa → でんわ"      $ Romaji.romajiToHiragana "denbwa" `shouldBe` "でんわ"
+      it "n'a → んあ"           $ Romaji.romajiToHiragana "n'a"    `shouldBe` "んあ"
 
     describe "っ (small tsu / doubled consonant)" $ do
       it "kka → っか" $ Romaji.romajiToHiragana "kka"  `shouldBe` "っか"
