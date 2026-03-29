@@ -165,7 +165,7 @@ theMap = attrMap V.defAttr
   , (attrName "header",  fg V.cyan)
   , (attrName "ok",      fg V.green)
   , (attrName "bad",     fg V.red)
-  , (attrName "hint",    fg V.brightBlack)
+  , (attrName "hint",    fg V.white)
   ]
 
 --------------------------------------------------------------------------------
