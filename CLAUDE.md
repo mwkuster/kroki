@@ -45,7 +45,8 @@ This is a WaniKani (kanji/vocabulary SRS) CLI+TUI app. The study flow:
 - `Enter` — submit answer
 - `Ctrl-o` — override as correct
 - `Ctrl-r` — requeue question later (no penalty)
-- `Ctrl-p` — play pronunciation audio (reading questions on vocabulary, requires `audio_player` in config)
+- `Ctrl-a` — show all info overlay (components, meanings, readings, mnemonics); ↑↓/j/k to scroll, Ctrl-a/Esc to close
+- `Ctrl-p` — play pronunciation audio (vocabulary, requires `audio_player` in config)
 - `Ctrl-s` — submit batch to WaniKani
 - `Esc`/`Ctrl-q` — quit
 

@@ -12,6 +12,7 @@ import System.Exit (die)
 
 import Data.Time (getCurrentTime, getCurrentTimeZone, utcToLocalTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
+import Data.List (nub)
 import Data.Maybe (fromMaybe)
 import Data.Map.Strict qualified as M
 import qualified Data.Text as T
@@ -86,14 +87,17 @@ main = do
                 let subjectIds = map Api.asSubjectId as
                     subjToAsg  = M.fromList [ (Api.asSubjectId a, Api.asId a) | a <- as ]
                 subjects <- Api.getSubjectsByIds t subjectIds
-                let asgToSubj = M.fromList
+                let compIds = nub [ cid | s <- subjects, cid <- Api.subjComponentIds s ]
+                compSubjects <- Api.getSubjectsByIds t compIds
+                let allSubjMap = M.fromList [ (Api.subjId s, s) | s <- subjects ++ compSubjects ]
+                    asgToSubj  = M.fromList
                       [ (asgId, subj)
                       | subj <- subjects
                       , Just asgId <- [M.lookup (Api.subjId subj) subjToAsg]
                       ]
                 logInfo ("Batch: " <> show (length subjects) <> " items (max " <> show n <> ")")
                 let audioPlayer = Config.cfgAudioPlayer cfg
-                wantsMore <- Tui.runStudyTui rqAfter audioPlayer subjToAsg subjects (submitBatch asgToSubj)
+                wantsMore <- Tui.runStudyTui rqAfter audioPlayer allSubjMap subjToAsg subjects (submitBatch asgToSubj)
                 if wantsMore then runBatch else pure ()
 
           submitBatch asgToSubj subs =

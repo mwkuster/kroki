@@ -34,6 +34,7 @@ import qualified Graphics.Vty.CrossPlatform as VCP
 import Control.Monad (void)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Map.Strict as M
+import qualified Data.Maybe (mapMaybe)
 import qualified Data.Vector as Vec
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -77,7 +78,7 @@ data Progress = Progress
 -- TUI state
 --------------------------------------------------------------------------------
 
-data Name = QueueList
+data Name = QueueList | InfoViewport
   deriving (Ord, Eq, Show)
 
 data Mode
@@ -102,16 +103,18 @@ data AppState = AppState
   , stBanner       :: Maybe Text
   , stHasMore      :: Bool
   , stWantsMore    :: Bool
-  , stAudioPlayer  :: Maybe String  -- command to play audio (e.g. "mpv --really-quiet")
-  , stSubmitDetails :: [String]     -- per-submission lines shown after submit
+  , stAudioPlayer   :: Maybe String         -- command to play audio (e.g. "mpv --really-quiet")
+  , stSubmitDetails :: [String]             -- per-submission lines shown after submit
+  , stShowAllInfo   :: Bool                 -- Ctrl-a overlay
+  , stAllSubjects   :: M.Map Int Api.Subject -- full subject map incl. components
   }
 
 --------------------------------------------------------------------------------
 -- Entry point
 --------------------------------------------------------------------------------
 
-runStudyTui :: Int -> Maybe String -> M.Map Int Int -> [Api.Subject] -> ([Submission] -> IO SubmitResult) -> IO Bool
-runStudyTui rqAfter audioPlayer subjToAsg subjects submitFn = do
+runStudyTui :: Int -> Maybe String -> M.Map Int Api.Subject -> M.Map Int Int -> [Api.Subject] -> ([Submission] -> IO SubmitResult) -> IO Bool
+runStudyTui rqAfter audioPlayer allSubjects subjToAsg subjects submitFn = do
   let queue0 = concatMap mkQuestions subjects
       prog0  = M.fromList [ (Api.subjId s, initProgress s) | s <- subjects ]
 
@@ -133,6 +136,8 @@ runStudyTui rqAfter audioPlayer subjToAsg subjects submitFn = do
         , stWantsMore     = False
         , stAudioPlayer   = audioPlayer
         , stSubmitDetails = []
+        , stShowAllInfo   = False
+        , stAllSubjects   = allSubjects
         }
 
   let buildVty = VCP.mkVty V.defaultConfig
@@ -193,7 +198,12 @@ drawQueueItem _ q =
   in str (displayItem s <> " [" <> kindLabel (qKind q) <> "]")
 
 drawMain :: AppState -> Widget Name
-drawMain st =
+drawMain st
+  | stShowAllInfo st =
+      case currentQuestion st of
+        Just q  -> drawAllInfo q st
+        Nothing -> emptyWidget
+  | otherwise =
   case currentQuestion st of
     Nothing ->
       B.borderWithLabel (str "Done") $
@@ -275,7 +285,7 @@ drawMode st q =
             txt ("✓ accepted:    " <> T.pack (intercalate ", " expected))
         , padTop (Pad 1) $
             withAttr (attrName "hint") $
-              vBox $ [ str "Ctrl-o=override correct  Ctrl-r=requeue (no penalty)  Enter=requeue (wrong)" ]
+              vBox $ [ str "Ctrl-o=override  Ctrl-r=requeue (no penalty)  Ctrl-a=all info  Enter=requeue (wrong)" ]
                   ++ [ str "Ctrl-p=play audio" | hasAudio q st ]
         ]
 
@@ -305,6 +315,61 @@ drawMode st q =
           Just msg -> [padTop (Pad 1) (txt msg)]
           Nothing  -> []
 
+drawAllInfo :: Q -> AppState -> Widget Name
+drawAllInfo q st =
+  B.borderWithLabel (txt label) $
+    viewport InfoViewport Vertical $
+      padAll 1 $
+        vBox $
+             compSection
+          ++ [ str ("Meanings:  " <> T.unpack (T.intercalate ", " (Api.subjMeanings subj))) ]
+          ++ readSection
+          ++ mnSection "Meaning mnemonic" (Api.subjMeaningMnemonic subj)
+          ++ mnSection "Reading mnemonic" (Api.subjReadingMnemonic subj)
+          ++ [ padTop (Pad 1) $
+                 withAttr (attrName "hint") $
+                   str "Ctrl-a / Esc = close   ↑↓ / j k = scroll" ]
+  where
+    subj  = qSubject q
+    label = maybe "?" id (Api.subjChars subj)
+         <> " · " <> subjTypeLabel (Api.subjType subj)
+
+    compSection =
+      let comps = Data.Maybe.mapMaybe (\cid -> M.lookup cid (stAllSubjects st))
+                                      (Api.subjComponentIds subj)
+      in case comps of
+           [] -> []
+           cs -> str "Components:"
+               : map (\c -> str ("  " <> T.unpack (maybe "?" id (Api.subjChars c))
+                              <> "  " <> T.unpack (T.intercalate ", " (Api.subjMeanings c)))) cs
+              ++ [str ""]
+
+    readSection =
+      case Api.subjReadings subj of
+        [] -> []
+        rs -> [ str ("Readings:  " <> T.unpack (T.intercalate ", " rs)) ]
+
+    mnSection _     Nothing  = []
+    mnSection title (Just t) =
+      [ str ""
+      , withAttr (attrName "hint") (str (title <> ":"))
+      , txtWrap (stripWkTags t)
+      ]
+
+subjTypeLabel :: Api.SubjectType -> Text
+subjTypeLabel Api.Radical        = "Radical"
+subjTypeLabel Api.Kanji          = "Kanji"
+subjTypeLabel Api.Vocabulary     = "Vocabulary"
+subjTypeLabel Api.KanaVocabulary = "Kana Vocabulary"
+
+-- Strip WaniKani HTML-like tags (<radical>…</radical> etc.), keeping inner text.
+stripWkTags :: Text -> Text
+stripWkTags t = T.pack (go (T.unpack t))
+  where
+    go []        = []
+    go ('<':cs)  = go (drop 1 (dropWhile (/= '>') cs))
+    go (c  :cs)  = c : go cs
+
 --------------------------------------------------------------------------------
 -- Event handling
 --------------------------------------------------------------------------------
@@ -312,12 +377,25 @@ drawMode st q =
 handleEvent :: ([Submission] -> IO SubmitResult) -> BrickEvent Name e -> EventM Name AppState ()
 handleEvent submitFn (VtyEvent ev) = do
   st <- get
-  case stMode st of
-    WrongAnswer _ _ -> handleWrongAnswer ev
-    ConfirmSubmit   -> handleConfirm submitFn ev
-    Finished        -> handleFinished ev
-    _               -> handleNormal ev
+  if stShowAllInfo st
+    then handleAllInfo ev
+    else case stMode st of
+      WrongAnswer _ _ -> handleWrongAnswer ev
+      ConfirmSubmit   -> handleConfirm submitFn ev
+      Finished        -> handleFinished ev
+      _               -> handleNormal ev
 handleEvent _ _ = pure ()
+
+handleAllInfo :: V.Event -> EventM Name AppState ()
+handleAllInfo ev =
+  case ev of
+    V.EvKey (V.KChar 'a') [V.MCtrl] -> modify $ \st -> st { stShowAllInfo = False }
+    V.EvKey V.KEsc []                -> modify $ \st -> st { stShowAllInfo = False }
+    V.EvKey V.KUp []                 -> vScrollBy (viewportScroll InfoViewport) (-1)
+    V.EvKey V.KDown []               -> vScrollBy (viewportScroll InfoViewport) 1
+    V.EvKey (V.KChar 'k') []         -> vScrollBy (viewportScroll InfoViewport) (-1)
+    V.EvKey (V.KChar 'j') []         -> vScrollBy (viewportScroll InfoViewport) 1
+    _                                -> pure ()
 
 handleWrongAnswer :: V.Event -> EventM Name AppState ()
 handleWrongAnswer ev =
@@ -339,6 +417,9 @@ handleWrongAnswer ev =
       case currentQuestion st of
         Just q | hasAudio q st -> liftIO $ playAudio (stAudioPlayer st) (qSubject q)
         _ -> pure ()
+
+    V.EvKey (V.KChar 'a') [V.MCtrl] ->
+      modify $ \st -> st { stShowAllInfo = True }
 
     V.EvKey V.KEnter [] -> do
       st <- get
@@ -421,6 +502,9 @@ handleNormal ev =
       case currentQuestion st of
         Just q | hasAudio q st -> liftIO $ playAudio (stAudioPlayer st) (qSubject q)
         _ -> pure ()
+
+    V.EvKey (V.KChar 'a') [V.MCtrl] ->
+      modify $ \st -> st { stShowAllInfo = True }
 
     V.EvKey V.KEsc [] ->
       halt
@@ -657,9 +741,9 @@ hasAudio q st =
 
 normalHintWidget :: Q -> AppState -> Widget Name
 normalHintWidget q st =
-  vBox $ [ str "Enter=submit  Ctrl-o=override  Ctrl-r=requeue  Esc=quit"
-         , str "Ctrl-s=submit batch" <+> audioHint
-         ]
+  vBox [ str "Enter=submit  Ctrl-o=override  Ctrl-r=requeue  Ctrl-a=all info  Esc=quit"
+       , str "Ctrl-s=submit batch" <+> audioHint
+       ]
   where
     audioHint
       | hasAudio q st = str "  Ctrl-p=play audio"

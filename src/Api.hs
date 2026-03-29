@@ -246,12 +246,15 @@ data SubjectType = Radical | Kanji | Vocabulary | KanaVocabulary
   deriving (Show, Eq)
 
 data Subject = Subject
-  { subjId         :: Int
-  , subjType       :: SubjectType
-  , subjChars      :: Maybe Text
-  , subjMeanings   :: [Text]   -- accepted meanings
-  , subjReadings   :: [Text]   -- accepted readings (kana/romaji depending on type)
-  , subjAudioUrls  :: [Text]   -- pronunciation audio URLs (vocab only)
+  { subjId               :: Int
+  , subjType             :: SubjectType
+  , subjChars            :: Maybe Text
+  , subjMeanings         :: [Text]       -- accepted meanings
+  , subjReadings         :: [Text]       -- accepted readings (kana/romaji depending on type)
+  , subjAudioUrls        :: [Text]       -- pronunciation audio URLs (vocab only)
+  , subjMeaningMnemonic  :: Maybe Text
+  , subjReadingMnemonic  :: Maybe Text
+  , subjComponentIds     :: [Int]        -- radicals for kanji; kanji for vocab
   } deriving (Show, Eq)
 
 newtype SubjectsEnvelope = SubjectsEnvelope { suData :: [Subject] } deriving (Show)
@@ -284,13 +287,24 @@ instance FromJSON Subject where
       KanaVocabulary -> maybe [] (map paUrl) <$> (d .:? "pronunciation_audios")
       _              -> pure []
 
+    mmnem   <- d .:? "meaning_mnemonic"
+    rmnem   <- case st of
+      Radical -> pure Nothing
+      _       -> d .:? "reading_mnemonic"
+    compIds <- case st of
+      Radical -> pure []
+      _       -> maybe [] id <$> (d .:? "component_subject_ids")
+
     pure Subject
-      { subjId        = sid
-      , subjType      = st
-      , subjChars     = chars
-      , subjMeanings  = meanings
-      , subjReadings  = readings
-      , subjAudioUrls = audioUrls
+      { subjId              = sid
+      , subjType            = st
+      , subjChars           = chars
+      , subjMeanings        = meanings
+      , subjReadings        = readings
+      , subjAudioUrls       = audioUrls
+      , subjMeaningMnemonic = mmnem
+      , subjReadingMnemonic = rmnem
+      , subjComponentIds    = compIds
       }
 
 parseSubjectType :: Text -> Parser SubjectType

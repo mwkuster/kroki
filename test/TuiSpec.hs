@@ -17,34 +17,43 @@ import qualified Tui
 -- Minimal kanji subject for testing
 kanjiSubj :: Api.Subject
 kanjiSubj = Api.Subject
-  { Api.subjId        = 1
-  , Api.subjType      = Api.Kanji
-  , Api.subjChars     = Just "日"
-  , Api.subjMeanings  = ["Sun", "Day"]
-  , Api.subjReadings  = ["にち", "じつ"]
-  , Api.subjAudioUrls = []
+  { Api.subjId              = 1
+  , Api.subjType            = Api.Kanji
+  , Api.subjChars           = Just "日"
+  , Api.subjMeanings        = ["Sun", "Day"]
+  , Api.subjReadings        = ["にち", "じつ"]
+  , Api.subjAudioUrls       = []
+  , Api.subjMeaningMnemonic = Nothing
+  , Api.subjReadingMnemonic = Nothing
+  , Api.subjComponentIds    = []
   }
 
 -- Radical (no reading question)
 radicalSubj :: Api.Subject
 radicalSubj = Api.Subject
-  { Api.subjId        = 2
-  , Api.subjType      = Api.Radical
-  , Api.subjChars     = Just "一"
-  , Api.subjMeanings  = ["One"]
-  , Api.subjReadings  = []
-  , Api.subjAudioUrls = []
+  { Api.subjId              = 2
+  , Api.subjType            = Api.Radical
+  , Api.subjChars           = Just "一"
+  , Api.subjMeanings        = ["One"]
+  , Api.subjReadings        = []
+  , Api.subjAudioUrls       = []
+  , Api.subjMeaningMnemonic = Nothing
+  , Api.subjReadingMnemonic = Nothing
+  , Api.subjComponentIds    = []
   }
 
 -- Vocab subject
 vocabSubj :: Api.Subject
 vocabSubj = Api.Subject
-  { Api.subjId        = 3
-  , Api.subjType      = Api.Vocabulary
-  , Api.subjChars     = Just "学校"
-  , Api.subjMeanings  = ["School"]
-  , Api.subjReadings  = ["がっこう"]
-  , Api.subjAudioUrls = []
+  { Api.subjId              = 3
+  , Api.subjType            = Api.Vocabulary
+  , Api.subjChars           = Just "学校"
+  , Api.subjMeanings        = ["School"]
+  , Api.subjReadings        = ["がっこう"]
+  , Api.subjAudioUrls       = []
+  , Api.subjMeaningMnemonic = Nothing
+  , Api.subjReadingMnemonic = Nothing
+  , Api.subjComponentIds    = []
   }
 
 mkQ :: Api.Subject -> Tui.QKind -> Tui.Q
@@ -68,6 +77,8 @@ stateWith prog subjToAsg = Tui.AppState
   , Tui.stWantsMore    = False
   , Tui.stAudioPlayer   = Nothing
   , Tui.stSubmitDetails = []
+  , Tui.stShowAllInfo   = False
+  , Tui.stAllSubjects   = M.empty
   }
 
 --------------------------------------------------------------------------------
