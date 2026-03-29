@@ -232,12 +232,12 @@ drawMain st
                   Nothing  -> []
               hintLine =
                 case stMode st of
-                  ConfirmSubmit -> str "y/Enter=confirm  n/Esc=cancel"
+                  ConfirmSubmit ->
+                    hintBox ["y/Enter=confirm", "n/Esc=cancel"]
                   _ | Just _ <- stBanner st ->
-                        if stHasMore st
-                          then str "Ctrl-n=next batch  Esc=quit"
-                          else str "Esc=quit"
-                  _ -> str "Ctrl-s=submit to WaniKani  Esc=quit"
+                        hintBox $ ["Esc=quit"] ++
+                          [ "Ctrl-n=next batch" | stHasMore st ]
+                  _ -> hintBox ["Ctrl-s=submit to WaniKani", "Esc=quit"]
           in vBox
                ( [ withAttr (attrName "ok") $ str "Session finished."
                  , str ("correct:     " <> show (stCorrect st))
@@ -284,9 +284,10 @@ drawMode st q =
         , withAttr (attrName "ok") $
             txt ("✓ accepted:    " <> T.pack (intercalate ", " expected))
         , padTop (Pad 1) $
-            withAttr (attrName "hint") $
-              vBox $ [ str "Ctrl-o=override  Ctrl-r=requeue (no penalty)  Ctrl-a=all info  Enter=requeue (wrong)" ]
-                  ++ [ str "Ctrl-p=play audio" | hasAudio q st ]
+            hintBox $
+              [ "Ctrl-o=override correct", "Ctrl-r=requeue (no penalty)"
+              , "Ctrl-a=all info", "Enter=requeue (wrong)"
+              ] ++ [ "Ctrl-p=play audio" | hasAudio q st ]
         ]
 
     Feedback msg ->
@@ -327,8 +328,7 @@ drawAllInfo q st =
           ++ mnSection "Meaning mnemonic" (Api.subjMeaningMnemonic subj)
           ++ mnSection "Reading mnemonic" (Api.subjReadingMnemonic subj)
           ++ [ padTop (Pad 1) $
-                 withAttr (attrName "hint") $
-                   str "Ctrl-a / Esc = close   ↑↓ / j k = scroll" ]
+                 hintBox ["Ctrl-a/Esc=close", "↑↓/j/k=scroll"] ]
   where
     subj  = qSubject q
     label = maybe "?" id (Api.subjChars subj)
@@ -739,15 +739,18 @@ hasAudio :: Q -> AppState -> Bool
 hasAudio q st =
   not (null (Api.subjAudioUrls (qSubject q))) && stAudioPlayer st /= Nothing
 
+-- | Render a list of hint strings as auto-wrapping text.
+hintBox :: [Text] -> Widget Name
+hintBox hints =
+  withAttr (attrName "hint") $
+    txtWrap (T.intercalate "  " hints)
+
 normalHintWidget :: Q -> AppState -> Widget Name
 normalHintWidget q st =
-  vBox [ str "Enter=submit  Ctrl-o=override  Ctrl-r=requeue  Ctrl-a=all info  Esc=quit"
-       , str "Ctrl-s=submit batch" <+> audioHint
-       ]
-  where
-    audioHint
-      | hasAudio q st = str "  Ctrl-p=play audio"
-      | otherwise     = emptyWidget
+  hintBox $
+    [ "Enter=submit", "Ctrl-o=override", "Ctrl-r=requeue"
+    , "Ctrl-a=all info", "Esc=quit", "Ctrl-s=submit batch"
+    ] ++ [ "Ctrl-p=play audio" | hasAudio q st ]
 
 -- | Fire-and-forget audio playback via configured external player.
 playAudio :: Maybe String -> Api.Subject -> IO ()
