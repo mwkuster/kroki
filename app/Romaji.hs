@@ -89,7 +89,7 @@ table =
   , ("rya","りゃ"),("ryu","りゅ"),("ryo","りょ")
 
   , ("tsu","つ"),("shi","し"),("chi","ち"),("fu","ふ")
-  , ("dzu","づ"),("ji","じ")   -- keep simple; WK often uses 'ji'
+  , ("dzu","づ"),("du","づ"),("di","ぢ"),("ji","じ")   -- WK uses 'ji'; di/du are kana alternatives
   , ("kwi","くぃ"),("kwe","くぇ"),("kwo","くぉ")
   , ("gwi","ぐぃ"),("gwe","ぐぇ"),("gwo","ぐぉ")
 
