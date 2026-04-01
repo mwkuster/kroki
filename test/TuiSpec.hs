@@ -94,6 +94,21 @@ spec = do
     it "collapses inner spaces"   $ Tui.normMeaning "to  go"     `shouldBe` "to go"
     it "case-folds unicode"       $ Tui.normMeaning "GROß"       `shouldBe` "gross"
     it "empty string stays empty" $ Tui.normMeaning ""           `shouldBe` ""
+    describe "british spellings" $ do
+      it "colour → color"           $ Tui.normMeaning "colour"       `shouldBe` "color"
+      it "honour → honor"           $ Tui.normMeaning "honour"       `shouldBe` "honor"
+      it "behaviour → behavior"     $ Tui.normMeaning "behaviour"    `shouldBe` "behavior"
+      it "centre → center"          $ Tui.normMeaning "centre"       `shouldBe` "center"
+      it "theatre → theater"        $ Tui.normMeaning "theatre"      `shouldBe` "theater"
+      it "defence → defense"        $ Tui.normMeaning "defence"      `shouldBe` "defense"
+      it "licence → license"        $ Tui.normMeaning "licence"      `shouldBe` "license"
+      it "analyse → analyze"        $ Tui.normMeaning "analyse"      `shouldBe` "analyze"
+      it "organise → organize"      $ Tui.normMeaning "organise"     `shouldBe` "organize"
+      it "organisation → organization" $ Tui.normMeaning "organisation" `shouldBe` "organization"
+      it "catalogue → catalog"      $ Tui.normMeaning "catalogue"    `shouldBe` "catalog"
+      it "four unchanged"           $ Tui.normMeaning "four"         `shouldBe` "four"
+      it "rise unchanged"           $ Tui.normMeaning "rise"         `shouldBe` "rise"
+      it "surprise unchanged"       $ Tui.normMeaning "surprise"     `shouldBe` "surprise"
 
   describe "normReading" $ do
     it "passes through hiragana unchanged" $

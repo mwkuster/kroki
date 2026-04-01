@@ -767,7 +767,60 @@ playAudio (Just cmd) subj =
       void $ spawnProcess exe (args ++ [T.unpack url])
 
 normMeaning :: Text -> Text
-normMeaning = collapseSpaces . T.toCaseFold . T.strip
+normMeaning = collapseSpaces . britishToAmerican . T.toCaseFold . T.strip
+
+-- | Convert British English spellings to American English, word by word.
+-- Applied after case-folding so all lookups are lowercase.
+britishToAmerican :: Text -> Text
+britishToAmerican = T.unwords . map convertWord . T.words
+  where
+    convertWord w = M.findWithDefault (applySuffixRules w) w wordTable
+
+    -- Word-pair table for cases that don't follow simple suffix rules.
+    -- All keys must be lowercase (applied after toCaseFold).
+    wordTable :: M.Map Text Text
+    wordTable = M.fromList $
+         re "centre"   "center"
+      ++ re "theatre"  "theater"
+      ++ re "fibre"    "fiber"
+      ++ re "litre"    "liter"
+      ++ re "metre"    "meter"
+      ++ re "spectre"  "specter"
+      ++ re "sabre"    "saber"
+      ++ re "calibre"  "caliber"
+      ++ re "lustre"   "luster"
+      ++ re "sombre"   "somber"
+      ++ [ ("defence",  "defense"),  ("defences",  "defenses")
+         , ("offence",  "offense"),  ("offences",  "offenses")
+         , ("pretence", "pretense"), ("pretences", "pretenses")
+         , ("licence",  "license"),  ("licences",  "licenses")
+         , ("practise", "practice")
+         ]
+      where
+        re b a = [(b, a), (b <> "s", a <> "s")]
+
+    applySuffixRules w
+      | "iour"    `T.isSuffixOf` w                  = T.dropEnd 4 w <> "ior"
+      | "our"     `T.isSuffixOf` w
+      , w `notElem` ourBlacklist                     = T.dropEnd 3 w <> "or"
+      | "yse"     `T.isSuffixOf` w                  = T.dropEnd 3 w <> "yze"
+      | "isation" `T.isSuffixOf` w                  = T.dropEnd 7 w <> "ization"
+      | "ise"     `T.isSuffixOf` w
+      , w `notElem` iseBlacklist                     = T.dropEnd 3 w <> "ize"
+      | "ogue"    `T.isSuffixOf` w                  = T.dropEnd 4 w <> "og"
+      | otherwise                                    = w
+
+    ourBlacklist =
+      [ "four", "pour", "hour", "your", "sour", "dour", "tour", "flour"
+      , "amour", "contour", "detour", "velour", "troubadour", "paramour" ]
+
+    iseBlacklist =
+      [ "rise", "wise", "guise", "surprise", "revise", "advise", "devise"
+      , "enterprise", "exercise", "franchise", "improvise", "promise"
+      , "supervise", "advertise", "comprise", "disguise", "arise"
+      , "otherwise", "likewise", "clockwise", "lengthwise"
+      , "prise", "demise", "surmise", "premise", "treatise"
+      , "precise", "concise" ]
 
 normReading :: Text -> Text
 normReading t =
