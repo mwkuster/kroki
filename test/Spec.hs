@@ -69,6 +69,7 @@ main = hspec $ do
       it "sakura → さくら"  $ Romaji.romajiToHiragana "sakura"   `shouldBe` "さくら"
       it "gakkou → がっこう" $ Romaji.romajiToHiragana "gakkou"  `shouldBe` "がっこう"
       it "macchi → まっち"  $ Romaji.romajiToHiragana "macchi"   `shouldBe` "まっち"
+      it "chidimaru → ちぢまる"  $ Romaji.romajiToHiragana "chidimaru" `shouldBe` "ちぢまる"
 
     describe "case insensitivity" $ do
       it "KA → か" $ Romaji.romajiToHiragana "KA"  `shouldBe` "か"
