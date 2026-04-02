@@ -4,6 +4,7 @@ import qualified Cli
 import qualified Api
 import qualified Config
 import qualified Tui
+import Util (strPadLeft, strPadRight)
 
 import Control.Applicative ((<|>))
 import System.Environment (lookupEnv)
@@ -34,14 +35,6 @@ main = do
           pure
           token
 
-  let batchSize =
-        Cli.optBatchSize opts
-        <|> Config.cfgBatchSize cfg
-        <|> Just Config.defaultBatchSize
-
-      rqAfter =
-        fromMaybe Config.defaultRequeueAfter (Cli.optRequeueAfter opts <|> Config.cfgRequeueAfter cfg)
-
   case Cli.optCommand opts of
     Cli.Init -> Config.initConfig
 
@@ -69,16 +62,23 @@ main = do
       mapM_
         (\(hStart, newN, openN) ->
           putStrLn
-            ( padRight 20 (fmtHour hStart) <> "  "
-           <> padLeft 3 (show newN) <> "  "
-           <> padLeft 4 (show openN)
+            ( strPadRight 20 (fmtHour hStart) <> "  "
+           <> strPadLeft 3 (show newN) <> "  "
+           <> strPadLeft 4 (show openN)
             )
         )
         rows
 
-    Cli.Study -> do
+    Cli.Study studyOpts -> do
       t <- requireToken
-      let n = fromMaybe 10 batchSize
+      let batchSize =
+            Cli.studyBatchSize studyOpts
+            <|> Config.cfgBatchSize cfg
+            <|> Just Config.defaultBatchSize
+          rqAfter =
+            fromMaybe Config.defaultRequeueAfter
+              (Cli.studyRequeueAfter studyOpts <|> Config.cfgRequeueAfter cfg)
+          n = fromMaybe 10 batchSize
       now  <- getCurrentTime
       tz   <- getCurrentTimeZone
       user <- Api.getUser t
@@ -140,7 +140,7 @@ fmtSub asgToSubj s =
         | otherwise = "incorrect"
                    <> " (meaning wrong: " <> show (Tui.subWrongMeaning s)
                    <> ", reading wrong: " <> show (Tui.subWrongReading s) <> ")"
-  in padRight 30 name <> "  " <> status
+  in strPadRight 30 name <> "  " <> status
 
 subjLabel :: Api.Subject -> String
 subjLabel subj =
@@ -152,8 +152,3 @@ subjLabel subj =
                   []    -> "?"
   in if null chars then meaning else chars <> " (" <> meaning <> ")"
 
-padLeft :: Int -> String -> String
-padLeft n s = replicate (max 0 (n - length s)) ' ' <> s
-
-padRight :: Int -> String -> String
-padRight n s = s <> replicate (max 0 (n - length s)) ' '

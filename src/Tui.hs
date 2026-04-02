@@ -24,6 +24,7 @@ module Tui
 
 import qualified Api
 import qualified Romaji
+import Util (strPadLeft, strPadRight)
 
 import Brick
 import qualified Brick.Widgets.Border as B
@@ -243,9 +244,9 @@ drawMain st
                   ConfirmSubmit ->
                     hintBox ["y/Enter=confirm", "n/Esc=cancel"]
                   _ | Just _ <- stBanner st ->
-                        hintBox $ ["Esc=quit"] ++
+                        hintBox $ ["Esc=quit", "Ctrl-u=user", "Ctrl-v=reviews"] ++
                           [ "Ctrl-n=next batch" | stHasMore st ]
-                  _ -> hintBox ["Ctrl-s=submit to WaniKani", "Esc=quit"]
+                  _ -> hintBox ["Ctrl-s=submit to WaniKani", "Esc=quit", "Ctrl-u=user", "Ctrl-v=reviews"]
           in vBox
                ( [ withAttr (attrName "ok") $ str "Session finished."
                  , str ("correct:     " <> show (stCorrect st))
@@ -379,14 +380,11 @@ drawReviewSchedule st =
                  withAttr (attrName "hint") $ str "Hour (local)            New   Open"
              ] ++
              map (\(hStart, newN, openN) ->
-               str ( rjust 24 (fmtHour hStart)
-                  <> ljust 3 (show newN) <> "  "
-                  <> ljust 4 (show openN) )
+               str ( strPadRight 24 (fmtHour hStart)
+                  <> strPadLeft 3 (show newN) <> "  "
+                  <> strPadLeft 4 (show openN) )
              ) rows ++
              [ padTop (Pad 1) $ hintBox ["Ctrl-v/Esc=close", "↑↓/j/k=scroll"] ]
-  where
-    ljust n s = replicate (max 0 (n - length s)) ' ' <> s
-    rjust n s = s <> replicate (max 0 (n - length s)) ' '
 
 subjTypeLabel :: Api.SubjectType -> Text
 subjTypeLabel Api.Radical        = "Radical"
@@ -772,7 +770,7 @@ displayItem s =
           Api.KanaVocabulary -> " (Vocab)"
       core =
         case Api.subjChars s of
-          Just c | not (T.null (T.strip c)) -> T.unpack (T.strip c)
+          Just c | let cs = T.strip c, not (T.null cs) -> T.unpack cs
           _ ->
             let m = case Api.subjMeanings s of
                       (x:_) -> T.unpack x

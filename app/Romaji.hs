@@ -5,7 +5,7 @@ module Romaji
   , romajiToHiraganaLive
   ) where
 
-import Data.Char (isAlpha)
+import Data.Char (isAsciiLower, isAsciiUpper)
 import Data.List (find)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -15,7 +15,7 @@ import qualified Data.Text as T
 romajiToHiragana :: Text -> Text
 romajiToHiragana = go . T.toLower . T.filter keep
   where
-    keep c = isAlpha c || c == '\''
+    keep c = isAsciiLower c || isAsciiUpper c || c == '\''
     go t
       | T.null t  = ""
       | otherwise =
@@ -137,7 +137,7 @@ romajiToHiraganaLive input =
       (kana, pend)  = liveConvert t
   in kana <> pend
   where
-    keep c = isAlpha c || c == '\''
+    keep c = isAsciiLower c || isAsciiUpper c || c == '\''
 
 liveConvert :: Text -> (Text, Text)
 liveConvert t

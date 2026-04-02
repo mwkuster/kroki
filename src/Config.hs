@@ -11,7 +11,7 @@ module Config
 
 import Control.Exception (IOException, catch)
 import Data.Char (isSpace, toLower)
-import System.Directory (getXdgDirectory, XdgDirectory(XdgConfig), createDirectoryIfMissing)
+import System.Directory (getXdgDirectory, XdgDirectory(XdgConfig), createDirectoryIfMissing, doesFileExist)
 import System.FilePath ((</>))
 import System.IO (hFlush, stdout)
 
@@ -71,10 +71,8 @@ initConfig = do
   base <- getXdgDirectory XdgConfig "kroki"
   let path = base </> "config"
 
-  existing <- loadConfig
-
-  existingRaw <- readFile path `catch` \(_ :: IOException) -> pure ""
-  let fileExists = not (null (trim existingRaw))
+  existing   <- loadConfig
+  fileExists <- doesFileExist path
 
   if fileExists
     then do
@@ -97,14 +95,11 @@ writeConfigInteractive dir path existing = do
   audioPlay  <- prompt "Audio player command (leave empty to disable)" (cfgAudioPlayer existing)
 
   let lineFor key val = key <> "=" <> val
-      optLine key v = case v of
-        "" -> Nothing
-        _  -> Just (lineFor key v)
       content = unlines $ concat
-        [ [lineFor "token" token]
-        , [lineFor "batch_size"    batchSize   | not (null batchSize)]
-        , [lineFor "requeue_after" requeueAft  | not (null requeueAft)]
-        , maybe [] (\v -> [lineFor "audio_player" v]) (optLine "audio_player" audioPlay)
+        [ [lineFor "token"        token]
+        , [lineFor "batch_size"    batchSize  | not (null batchSize)]
+        , [lineFor "requeue_after" requeueAft | not (null requeueAft)]
+        , [lineFor "audio_player"  audioPlay  | not (null audioPlay)]
         ]
 
   createDirectoryIfMissing True dir

@@ -162,20 +162,29 @@ apiSpec :: Spec
 apiSpec = describe "Api JSON parsing" $ do
 
   describe "User" $ do
-    let validJson :: ByteString
-        validJson = "{\"data\":{\"username\":\"bob\",\"level\":5,\"profile_url\":\"https://example.com\"}}"
+    let innerJson :: ByteString
+        innerJson = "{\"username\":\"bob\",\"level\":5,\"profile_url\":\"https://example.com\"}"
+    let envelopeJson :: ByteString
+        envelopeJson = "{\"data\":{\"username\":\"bob\",\"level\":5,\"profile_url\":\"https://example.com\"}}"
 
     it "parses username" $
-      fmap Api.userUsername (decode validJson) `shouldBe` Just "bob"
+      fmap Api.userUsername (decode innerJson :: Maybe Api.User) `shouldBe` Just "bob"
 
     it "parses level" $
-      fmap Api.userLevel (decode validJson) `shouldBe` Just 5
+      fmap Api.userLevel (decode innerJson :: Maybe Api.User) `shouldBe` Just 5
 
     it "parses profile_url" $
-      fmap Api.userProfileUrl (decode validJson) `shouldBe` Just "https://example.com"
+      fmap Api.userProfileUrl (decode innerJson :: Maybe Api.User) `shouldBe` Just "https://example.com"
 
-    it "fails on missing data field" $
+    it "fails on missing required field" $
       (decode "{\"username\":\"bob\"}" :: Maybe Api.User) `shouldBe` Nothing
+
+    it "parses full API envelope via UserEnvelope" $
+      fmap (Api.userUsername . Api.ueData) (decode envelopeJson :: Maybe Api.UserEnvelope)
+        `shouldBe` Just "bob"
+
+    it "UserEnvelope fails on missing data wrapper" $
+      (decode innerJson :: Maybe Api.UserEnvelope) `shouldBe` Nothing
 
   describe "ReviewBucket" $ do
     let validJson :: ByteString

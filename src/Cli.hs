@@ -1,23 +1,27 @@
 module Cli
   ( Options(..)
   , Command(..)
+  , StudyOpts(..)
   , parseCli
   ) where
 
 import Options.Applicative
 
+data StudyOpts = StudyOpts
+  { studyBatchSize    :: Maybe Int
+  , studyRequeueAfter :: Maybe Int
+  } deriving (Show, Eq)
+
 data Command
   = WhoAmI
   | Reviews
-  | Study
+  | Study StudyOpts
   | Init
   deriving (Show, Eq)
 
 data Options = Options
-  { optToken        :: Maybe String
-  , optBatchSize    :: Maybe Int
-  , optRequeueAfter :: Maybe Int
-  , optCommand      :: Command
+  { optToken   :: Maybe String
+  , optCommand :: Command
   } deriving (Show, Eq)
 
 parseCli :: IO Options
@@ -35,8 +39,6 @@ optionsParser :: Parser Options
 optionsParser =
   Options
     <$> optional tokenOption
-    <*> optional batchSizeOption
-    <*> optional requeueAfterOption
     <*> commandParser
 
 tokenOption :: Parser String
@@ -44,7 +46,7 @@ tokenOption =
   strOption
     ( long "token"
    <> metavar "TOKEN"
-   <> help "WaniKani API token (otherwise read WANIKANI_API_TOKEN)" )
+   <> help "WaniKani API token (overrides WANIKANI_API_TOKEN env var and config file)" )
 
 batchSizeOption :: Parser Int
 batchSizeOption =
@@ -52,7 +54,6 @@ batchSizeOption =
     ( long "batch-size"
    <> metavar "N"
    <> help "Max reviews to include in a study batch (overrides config batch_size)" )
-
 
 requeueAfterOption :: Parser Int
 requeueAfterOption =
@@ -67,10 +68,17 @@ commandParser =
     (  command "whoami"
          (info (pure WhoAmI) (progDesc "Show current WaniKani user"))
     <> command "reviews"
-         (info (pure Reviews) (progDesc "Show number of reviews available now"))
+         (info (pure Reviews) (progDesc "Show review schedule for the next 24 hours"))
     <> command "study"
-         (info (pure Study) (progDesc "Start a review batch (max N items)"))
+         (info studyParser   (progDesc "Start a review batch (max N items)"))
     <> command "init"
-         (info (pure Init) (progDesc "Create or overwrite ~/.config/kroki/config interactively"))
+         (info (pure Init)   (progDesc "Create or overwrite ~/.config/kroki/config interactively"))
     )
-  <|> pure Study
+  <|> pure (Study (StudyOpts Nothing Nothing))
+
+studyParser :: Parser Command
+studyParser =
+  fmap Study $
+    StudyOpts
+      <$> optional batchSizeOption
+      <*> optional requeueAfterOption

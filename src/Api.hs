@@ -2,6 +2,7 @@
 
 module Api
   ( User(..)
+  , UserEnvelope(..)
   , getUser
 
   , Summary(..)
@@ -55,11 +56,15 @@ data User = User
   , userProfileUrl :: Text
   } deriving (Show, Eq)
 
--- Parses the top-level WaniKani user envelope: { "data": { "username": … } }
 instance FromJSON User where
-  parseJSON = withObject "UserResponse" $ \o -> do
-    d <- o .: "data"
-    User <$> d .: "username" <*> d .: "level" <*> d .: "profile_url"
+  parseJSON = withObject "User" $ \o ->
+    User <$> o .: "username" <*> o .: "level" <*> o .: "profile_url"
+
+newtype UserEnvelope = UserEnvelope { ueData :: User } deriving (Show, Eq)
+
+instance FromJSON UserEnvelope where
+  parseJSON = withObject "UserEnvelope" $ \o ->
+    UserEnvelope <$> o .: "data"
 
 data KrokiError
   = ApiDecodeError Text
@@ -75,7 +80,7 @@ getUser token = runReq defaultHttpConfig $ do
     NoReqBody
     jsonResponse
     (apiOpts token)
-  pure (responseBody resp :: User)
+  pure (ueData (responseBody resp :: UserEnvelope))
 
 --------------------------------------------------------------------------------
 -- Summary (reviews timeline)
