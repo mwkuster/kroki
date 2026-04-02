@@ -16,7 +16,6 @@ data Options = Options
   { optToken        :: Maybe String
   , optBatchSize    :: Maybe Int
   , optRequeueAfter :: Maybe Int
-  , optSubmit       :: Bool
   , optVerbose      :: Bool
   , optCommand      :: Command
   } deriving (Show, Eq)
@@ -38,7 +37,6 @@ optionsParser =
     <$> optional tokenOption
     <*> optional batchSizeOption
     <*> optional requeueAfterOption
-    <*> submitSwitch
     <*> verboseSwitch
     <*> commandParser
 
@@ -63,12 +61,6 @@ requeueAfterOption =
     ( long "requeue-after"
    <> metavar "K"
    <> help "Requeue a missed question K positions later (overrides config requeue_after)" )
-
-submitSwitch :: Parser Bool
-submitSwitch =
-  switch
-    ( long "submit"
-   <> help "Submit completed reviews to WaniKani at the end of the session" )
 
 verboseSwitch :: Parser Bool
 verboseSwitch =

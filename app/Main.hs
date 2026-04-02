@@ -100,35 +100,27 @@ main = do
                 wantsMore <- Tui.runStudyTui rqAfter audioPlayer allSubjMap subjToAsg subjects (submitBatch asgToSubj)
                 if wantsMore then runBatch else pure ()
 
-          submitBatch asgToSubj subs =
-            do
-              let details = map (fmtSub asgToSubj) subs
-              if not (Cli.optSubmit opts)
-                then pure Tui.SubmitResult
-                  { Tui.srMessage = "Run with --submit to actually commit results."
-                  , Tui.srHasMore = False
-                  , Tui.srDetails = details
-                  }
-                else do
-                  ts <- getCurrentTime
-                  mapM_
-                    (\s ->
-                      Api.createReview t
-                        (Tui.subAssignmentId s)
-                        (Tui.subWrongMeaning s)
-                        (Tui.subWrongReading s)
-                        ts
-                    )
-                    subs
-                  now2     <- getCurrentTime
-                  summary2 <- Api.getSummary t
-                  as2      <- Api.getAvailableAssignments t now2 n
-                  pure Tui.SubmitResult
-                    { Tui.srMessage = "Submitted. Reviews available now: "
-                                   <> show (Api.reviewsAvailableNow now2 summary2)
-                    , Tui.srHasMore = not (null as2)
-                    , Tui.srDetails = details
-                    }
+          submitBatch asgToSubj subs = do
+            let details = map (fmtSub asgToSubj) subs
+            ts <- getCurrentTime
+            mapM_
+              (\s ->
+                Api.createReview t
+                  (Tui.subAssignmentId s)
+                  (Tui.subWrongMeaning s)
+                  (Tui.subWrongReading s)
+                  ts
+              )
+              subs
+            now2     <- getCurrentTime
+            summary2 <- Api.getSummary t
+            as2      <- Api.getAvailableAssignments t now2 n
+            pure Tui.SubmitResult
+              { Tui.srMessage = "Submitted. Reviews available now: "
+                             <> show (Api.reviewsAvailableNow now2 summary2)
+              , Tui.srHasMore = not (null as2)
+              , Tui.srDetails = details
+              }
 
       runBatch
 

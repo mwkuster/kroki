@@ -10,7 +10,6 @@ cabal run kroki -- --help
 cabal run kroki -- whoami
 cabal run kroki -- reviews
 cabal run kroki -- study --batch-size 5
-cabal run kroki -- study --batch-size 5 --submit
 ```
 
 Token resolution order: `--token` flag → `WANIKANI_API_TOKEN` env var → `~/.config/kroki/config`
