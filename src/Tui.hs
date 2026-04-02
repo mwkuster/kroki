@@ -481,10 +481,6 @@ handleNormal ev =
     V.EvKey (V.KChar 'q') [V.MCtrl] ->
       halt
 
-    V.EvKey (V.KChar 's') [V.MCtrl] -> do
-      st <- get
-      put st { stMode = ConfirmSubmit }
-
     V.EvKey (V.KChar 'o') [V.MCtrl] -> do
       st <- get
       case currentQuestion st of
@@ -749,7 +745,7 @@ normalHintWidget :: Q -> AppState -> Widget Name
 normalHintWidget q st =
   hintBox $
     [ "Enter=submit", "Ctrl-o=override", "Ctrl-r=requeue"
-    , "Ctrl-a=all info", "Esc=quit", "Ctrl-s=submit batch"
+    , "Ctrl-a=all info", "Esc=quit"
     ] ++ [ "Ctrl-p=play audio" | hasAudio q st ]
 
 -- | Fire-and-forget audio playback via configured external player.

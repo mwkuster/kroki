@@ -6,7 +6,6 @@ import qualified Config
 import qualified Tui
 
 import Control.Applicative ((<|>))
-import Control.Monad (when)
 import System.Environment (lookupEnv)
 import System.Exit (die)
 
@@ -34,10 +33,7 @@ main = do
         pure
         token
 
-  let verbose = Cli.optVerbose opts
-      logInfo  = when verbose . putStrLn
-
-      batchSize =
+  let batchSize =
         Cli.optBatchSize opts
         <|> Config.cfgBatchSize cfg
         <|> Just 10
@@ -95,7 +91,6 @@ main = do
                       | subj <- subjects
                       , Just asgId <- [M.lookup (Api.subjId subj) subjToAsg]
                       ]
-                logInfo ("Batch: " <> show (length subjects) <> " items (max " <> show n <> ")")
                 let audioPlayer = Config.cfgAudioPlayer cfg
                 wantsMore <- Tui.runStudyTui rqAfter audioPlayer allSubjMap subjToAsg subjects (submitBatch asgToSubj)
                 if wantsMore then runBatch else pure ()

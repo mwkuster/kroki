@@ -6,6 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 cabal build
+cabal run kroki            # starts a study session (default)
 cabal run kroki -- --help
 cabal run kroki -- whoami
 cabal run kroki -- reviews

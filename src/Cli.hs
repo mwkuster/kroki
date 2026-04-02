@@ -16,7 +16,6 @@ data Options = Options
   { optToken        :: Maybe String
   , optBatchSize    :: Maybe Int
   , optRequeueAfter :: Maybe Int
-  , optVerbose      :: Bool
   , optCommand      :: Command
   } deriving (Show, Eq)
 
@@ -37,7 +36,6 @@ optionsParser =
     <$> optional tokenOption
     <*> optional batchSizeOption
     <*> optional requeueAfterOption
-    <*> verboseSwitch
     <*> commandParser
 
 tokenOption :: Parser String
@@ -62,19 +60,14 @@ requeueAfterOption =
    <> metavar "K"
    <> help "Requeue a missed question K positions later (overrides config requeue_after)" )
 
-verboseSwitch :: Parser Bool
-verboseSwitch =
-  switch
-    ( long "verbose"
-   <> short 'v'
-   <> help "Print informational log messages" )
-
 commandParser :: Parser Command
 commandParser =
-  hsubparser $
-       command "whoami"
+  hsubparser
+    (  command "whoami"
          (info (pure WhoAmI) (progDesc "Show current WaniKani user"))
     <> command "reviews"
          (info (pure Reviews) (progDesc "Show number of reviews available now"))
     <> command "study"
          (info (pure Study) (progDesc "Start a review batch (max N items)"))
+    )
+  <|> pure Study
