@@ -61,8 +61,8 @@ main = hspec $ do
       it "n before vowel stays" $ Romaji.romajiToHiragana "na"     `shouldBe` "な"
       it "kanna → かんな"       $ Romaji.romajiToHiragana "kanna"  `shouldBe` "かんな"
       it "denwa → でんわ"       $ Romaji.romajiToHiragana "denwa"  `shouldBe` "でんわ"
-      it "denbwa → でんわ"       $ Romaji.romajiToHiragana "denbwa" `shouldBe` "でんわ"
       it "n'a → んあ"           $ Romaji.romajiToHiragana "n'a"    `shouldBe` "んあ"
+      it "shinnsei → しんせい"   $ Romaji.romajiToHiragana "shinnsei"    `shouldBe` "しんせい"
 
     describe "っ (small tsu / doubled consonant)" $ do
       it "kka → っか" $ Romaji.romajiToHiragana "kka"  `shouldBe` "っか"
