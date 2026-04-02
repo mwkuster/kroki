@@ -15,7 +15,7 @@ import qualified Data.Text as T
 romajiToHiragana :: Text -> Text
 romajiToHiragana = go . T.toLower . T.filter keep
   where
-    keep c = isAlpha c || c == '\'' || c == '-' -- allow n' and ignore hyphens
+    keep c = isAlpha c || c == '\''
     go t
       | T.null t  = ""
       | otherwise =
@@ -93,7 +93,6 @@ table =
   , ("kwi","くぃ"),("kwe","くぇ"),("kwo","くぉ")
   , ("gwi","ぐぃ"),("gwe","ぐぇ"),("gwo","ぐぉ")
 
-  , ("kya","きゃ") -- (harmless redundancy if you edit table later)
   ]
   ++ basicRows
 

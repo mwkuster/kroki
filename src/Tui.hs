@@ -296,14 +296,7 @@ drawMode st q =
     Feedback msg ->
       withAttr (attrName "ok") $ txt msg
 
-    ConfirmSubmit -> drawConfirmSubmit st
-
-    Finished ->
-      vBox $
-        [ withAttr (attrName "ok") $ str "Finished." ] ++
-        case stBanner st of
-          Just msg -> [padTop (Pad 1) (txt msg)]
-          Nothing  -> []
+    _ -> emptyWidget
 
 drawConfirmSubmit :: AppState -> Widget Name
 drawConfirmSubmit st =
@@ -495,11 +488,11 @@ handleConfirm submitFn ev =
     V.EvKey V.KEnter []      -> doSubmit
     V.EvKey (V.KChar 'n') [] -> do
       st <- get
-      put st { stMode = Normal }
+      put st { stMode = Finished }
 
     V.EvKey V.KEsc [] -> do
       st <- get
-      put st { stMode = Normal }
+      put st { stMode = Finished }
 
     _ -> pure ()
   where
@@ -573,7 +566,8 @@ handleNormal ev =
       case currentQuestion st of
         Nothing -> pure ()
         Just q  ->
-          put (submitAnswer q (T.strip (stInput st)) st)
+          let ans = T.strip (stInput st)
+          in if T.null ans then pure () else put (submitAnswer q ans st)
 
     V.EvKey V.KBS [] -> do
       st <- get
