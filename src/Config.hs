@@ -3,12 +3,14 @@
 module Config
   ( KrokiConfig(..)
   , loadConfig
+  , initConfig
   ) where
 
 import Control.Exception (IOException, catch)
 import Data.Char (isSpace)
-import System.Directory (getXdgDirectory, XdgDirectory(XdgConfig))
+import System.Directory (getXdgDirectory, XdgDirectory(XdgConfig), createDirectoryIfMissing)
 import System.FilePath ((</>))
+import System.IO (hFlush, stdout)
 
 data KrokiConfig = KrokiConfig
   { cfgToken :: Maybe String
@@ -51,6 +53,71 @@ lookupKey key ls =
 
 trim :: String -> String
 trim = dropWhile isSpace . reverse . dropWhile isSpace . reverse
+
+-- | Interactively create (or overwrite) ~/.config/kroki/config.
+-- Prompts for each value; pressing Enter accepts the shown default.
+initConfig :: IO ()
+initConfig = do
+  base <- getXdgDirectory XdgConfig "kroki"
+  let path = base </> "config"
+
+  existing <- loadConfig
+
+  -- Check if file already exists (token present is a good proxy)
+  existingRaw <- readFile path `catch` \(_ :: IOException) -> pure ""
+  let fileExists = not (null (trim existingRaw))
+
+  if fileExists
+    then do
+      putStrLn ("Config file already exists at: " <> path)
+      putStr "Overwrite? [y/N] "
+      hFlush stdout
+      answer <- getLine
+      if map toLower answer `elem` ["y", "yes"]
+        then writeConfigInteractive base path existing
+        else putStrLn "Aborted."
+    else do
+      putStrLn ("Creating config at: " <> path)
+      writeConfigInteractive base path existing
+
+writeConfigInteractive :: FilePath -> FilePath -> KrokiConfig -> IO ()
+writeConfigInteractive dir path existing = do
+  token      <- prompt "WaniKani API token (required)" Nothing
+  batchSize  <- prompt "Batch size" (Just (maybe "10" show (cfgBatchSize existing)))
+  requeueAft <- prompt "Requeue after (positions)" (Just (maybe "7" show (cfgRequeueAfter existing)))
+  audioPlay  <- prompt "Audio player command (leave empty to disable)" (cfgAudioPlayer existing)
+
+  let lineFor key val = key <> "=" <> val
+      optLine key v = case v of
+        "" -> Nothing
+        _  -> Just (lineFor key v)
+      content = unlines $ concat
+        [ [lineFor "token" token]
+        , [lineFor "batch_size"    batchSize   | not (null batchSize)]
+        , [lineFor "requeue_after" requeueAft  | not (null requeueAft)]
+        , maybe [] (\v -> [lineFor "audio_player" v]) (optLine "audio_player" audioPlay)
+        ]
+
+  createDirectoryIfMissing True dir
+  writeFile path content
+  putStrLn ("Config written to: " <> path)
+
+-- | Prompt the user for a value. Shows the default in brackets; Enter accepts it.
+prompt :: String -> Maybe String -> IO String
+prompt label mDefault = do
+  let defStr = maybe "" (\d -> " [" <> d <> "]") mDefault
+  putStr (label <> defStr <> ": ")
+  hFlush stdout
+  input <- getLine
+  pure $ case (trim input, mDefault) of
+    ("", Just d) -> d
+    ("", Nothing) -> ""
+    (v,  _)      -> v
+
+toLower :: Char -> Char
+toLower c
+  | c >= 'A' && c <= 'Z' = toEnum (fromEnum c + 32)
+  | otherwise             = c
 
 lookupInt :: String -> [String] -> Maybe Int
 lookupInt key ls =

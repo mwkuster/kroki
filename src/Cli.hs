@@ -10,6 +10,7 @@ data Command
   = WhoAmI
   | Reviews
   | Study
+  | Init
   deriving (Show, Eq)
 
 data Options = Options
@@ -69,5 +70,7 @@ commandParser =
          (info (pure Reviews) (progDesc "Show number of reviews available now"))
     <> command "study"
          (info (pure Study) (progDesc "Start a review batch (max N items)"))
+    <> command "init"
+         (info (pure Init) (progDesc "Create or overwrite ~/.config/kroki/config interactively"))
     )
   <|> pure Study

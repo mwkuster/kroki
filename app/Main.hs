@@ -28,10 +28,11 @@ main = do
         <|> envToken
         <|> Config.cfgToken cfg
 
-  t <- maybe
-        (die "Missing API token. Provide --token, set WANIKANI_API_TOKEN, or put token=... into ~/.config/kroki/config")
-        pure
-        token
+  let requireToken =
+        maybe
+          (die "Missing API token. Provide --token, set WANIKANI_API_TOKEN, or put token=... into ~/.config/kroki/config")
+          pure
+          token
 
   let batchSize =
         Cli.optBatchSize opts
@@ -42,13 +43,17 @@ main = do
         fromMaybe 7 (Cli.optRequeueAfter opts <|> Config.cfgRequeueAfter cfg)
 
   case Cli.optCommand opts of
+    Cli.Init -> Config.initConfig
+
     Cli.WhoAmI -> do
+      t <- requireToken
       user <- Api.getUser t
       putStrLn ("Username: " <> Api.userUsername user)
       putStrLn ("Level:    " <> show (Api.userLevel user))
       putStrLn ("Profile:  " <> Api.userProfileUrl user)
 
     Cli.Reviews -> do
+      t <- requireToken
       now <- getCurrentTime
       tz  <- getCurrentTimeZone
       summary <- Api.getSummary t
@@ -72,6 +77,7 @@ main = do
         rows
 
     Cli.Study -> do
+      t <- requireToken
       let n = fromMaybe 10 batchSize
       now  <- getCurrentTime
       tz   <- getCurrentTimeZone
