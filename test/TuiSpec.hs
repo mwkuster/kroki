@@ -6,6 +6,8 @@ import Test.Hspec
 import qualified Data.Map.Strict as M
 import qualified Data.Vector as Vec
 import qualified Brick.Widgets.List as L
+import Data.Time (UTCTime(..), fromGregorian, secondsToDiffTime)
+import Data.Time.LocalTime (utc)
 
 import qualified Api
 import qualified Tui
@@ -77,8 +79,12 @@ stateWith prog subjToAsg = Tui.AppState
   , Tui.stWantsMore    = False
   , Tui.stAudioPlayer   = Nothing
   , Tui.stSubmitDetails = []
-  , Tui.stShowAllInfo   = False
+  , Tui.stOverlay       = Tui.NoOverlay
   , Tui.stAllSubjects   = M.empty
+  , Tui.stUser          = Api.User { Api.userUsername = "test", Api.userLevel = 1, Api.userProfileUrl = "" }
+  , Tui.stSummary       = Api.Summary { Api.summaryReviews = [] }
+  , Tui.stNow           = UTCTime (fromGregorian 2024 1 1) (secondsToDiffTime 0)
+  , Tui.stTZ            = utc
   }
 
 --------------------------------------------------------------------------------

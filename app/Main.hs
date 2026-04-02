@@ -73,10 +73,14 @@ main = do
 
     Cli.Study -> do
       let n = fromMaybe 10 batchSize
+      now  <- getCurrentTime
+      tz   <- getCurrentTimeZone
+      user <- Api.getUser t
+      summary <- Api.getSummary t
 
-          runBatch = do
-            now <- getCurrentTime
-            as  <- Api.getAvailableAssignments t now n
+      let runBatch = do
+            now2 <- getCurrentTime
+            as   <- Api.getAvailableAssignments t now2 n
             if null as
               then putStrLn "No reviews available right now."
               else do
@@ -92,7 +96,7 @@ main = do
                       , Just asgId <- [M.lookup (Api.subjId subj) subjToAsg]
                       ]
                 let audioPlayer = Config.cfgAudioPlayer cfg
-                wantsMore <- Tui.runStudyTui rqAfter audioPlayer allSubjMap subjToAsg subjects (submitBatch asgToSubj)
+                wantsMore <- Tui.runStudyTui rqAfter audioPlayer user summary now tz allSubjMap subjToAsg subjects (submitBatch asgToSubj)
                 if wantsMore then runBatch else pure ()
 
           submitBatch asgToSubj subs = do

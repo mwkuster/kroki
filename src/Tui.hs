@@ -9,6 +9,7 @@ module Tui
   , Progress(..)
   , AppState(..)
   , Mode(..)
+  , Overlay(..)
   , Name(..)
   , checkAnswer
   , normMeaning
@@ -39,6 +40,9 @@ import qualified Data.Vector as Vec
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.List (intercalate)
+import Data.Time (UTCTime, utcToLocalTime)
+import Data.Time.Format (defaultTimeLocale, formatTime)
+import Data.Time.LocalTime (TimeZone)
 import System.Process (spawnProcess)
 import System.Random (randomRIO)
 
@@ -78,8 +82,11 @@ data Progress = Progress
 -- TUI state
 --------------------------------------------------------------------------------
 
-data Name = QueueList | InfoViewport
+data Name = QueueList | InfoViewport | UserViewport | ReviewViewport
   deriving (Ord, Eq, Show)
+
+data Overlay = NoOverlay | AllInfo | UserInfo | ReviewSchedule
+  deriving (Show, Eq)
 
 data Mode
   = Normal
@@ -103,18 +110,22 @@ data AppState = AppState
   , stBanner       :: Maybe Text
   , stHasMore      :: Bool
   , stWantsMore    :: Bool
-  , stAudioPlayer   :: Maybe String         -- command to play audio (e.g. "mpv --really-quiet")
-  , stSubmitDetails :: [String]             -- per-submission lines shown after submit
-  , stShowAllInfo   :: Bool                 -- Ctrl-a overlay
+  , stAudioPlayer   :: Maybe String          -- command to play audio (e.g. "mpv --really-quiet")
+  , stSubmitDetails :: [String]              -- per-submission lines shown after submit
+  , stOverlay       :: Overlay               -- active info overlay
   , stAllSubjects   :: M.Map Int Api.Subject -- full subject map incl. components
+  , stUser          :: Api.User
+  , stSummary       :: Api.Summary
+  , stNow           :: UTCTime
+  , stTZ            :: TimeZone
   }
 
 --------------------------------------------------------------------------------
 -- Entry point
 --------------------------------------------------------------------------------
 
-runStudyTui :: Int -> Maybe String -> M.Map Int Api.Subject -> M.Map Int Int -> [Api.Subject] -> ([Submission] -> IO SubmitResult) -> IO Bool
-runStudyTui rqAfter audioPlayer allSubjects subjToAsg subjects submitFn = do
+runStudyTui :: Int -> Maybe String -> Api.User -> Api.Summary -> UTCTime -> TimeZone -> M.Map Int Api.Subject -> M.Map Int Int -> [Api.Subject] -> ([Submission] -> IO SubmitResult) -> IO Bool
+runStudyTui rqAfter audioPlayer user summary now tz allSubjects subjToAsg subjects submitFn = do
   let queue0 = concatMap mkQuestions subjects
       prog0  = M.fromList [ (Api.subjId s, initProgress s) | s <- subjects ]
 
@@ -136,8 +147,12 @@ runStudyTui rqAfter audioPlayer allSubjects subjToAsg subjects submitFn = do
         , stWantsMore     = False
         , stAudioPlayer   = audioPlayer
         , stSubmitDetails = []
-        , stShowAllInfo   = False
+        , stOverlay       = NoOverlay
         , stAllSubjects   = allSubjects
+        , stUser          = user
+        , stSummary       = summary
+        , stNow           = now
+        , stTZ            = tz
         }
 
   let buildVty = VCP.mkVty V.defaultConfig
@@ -199,10 +214,12 @@ drawQueueItem _ q =
 
 drawMain :: AppState -> Widget Name
 drawMain st
-  | stShowAllInfo st =
+  | stOverlay st == AllInfo =
       case currentQuestion st of
         Just q  -> drawAllInfo q st
         Nothing -> emptyWidget
+  | stOverlay st == UserInfo       = drawUserInfo st
+  | stOverlay st == ReviewSchedule = drawReviewSchedule st
   | otherwise =
   case currentQuestion st of
     Nothing ->
@@ -286,7 +303,8 @@ drawMode st q =
         , padTop (Pad 1) $
             hintBox $
               [ "Ctrl-o=override correct", "Ctrl-r=requeue (no penalty)"
-              , "Ctrl-a=all info", "Enter=requeue (wrong)"
+              , "Ctrl-a=all info", "Ctrl-u=user", "Ctrl-v=reviews"
+              , "Enter=requeue (wrong)"
               ] ++ [ "Ctrl-p=play audio" | hasAudio q st ]
         ]
 
@@ -356,6 +374,44 @@ drawAllInfo q st =
       , txtWrap (stripWkTags t)
       ]
 
+drawUserInfo :: AppState -> Widget Name
+drawUserInfo st =
+  let u = stUser st
+  in B.borderWithLabel (str "User") $
+       viewport UserViewport Vertical $
+         padAll 1 $
+           vBox
+             [ str ("Username: " <> Api.userUsername u)
+             , str ("Level:    " <> show (Api.userLevel u))
+             , str ("Profile:  " <> Api.userProfileUrl u)
+             , padTop (Pad 1) $ hintBox ["Ctrl-u/Esc=close"]
+             ]
+
+drawReviewSchedule :: AppState -> Widget Name
+drawReviewSchedule st =
+  let rows    = Api.reviewsPerHourNext24 (stNow st) (stSummary st)
+      nowAvail = Api.reviewsAvailableNow (stNow st) (stSummary st)
+      fmtHour utc =
+        formatTime defaultTimeLocale "%F %H:00" (utcToLocalTime (stTZ st) utc)
+  in B.borderWithLabel (str "Review Schedule") $
+       viewport ReviewViewport Vertical $
+         padAll 1 $
+           vBox $
+             [ withAttr (attrName "header") $
+                 str ("Available now: " <> show nowAvail)
+             , padTop (Pad 1) $
+                 withAttr (attrName "hint") $ str "Hour (local)            New   Open"
+             ] ++
+             map (\(hStart, newN, openN) ->
+               str ( rpad 24 (fmtHour hStart)
+                  <> lpad 3 (show newN) <> "  "
+                  <> lpad 4 (show openN) )
+             ) rows ++
+             [ padTop (Pad 1) $ hintBox ["Ctrl-v/Esc=close", "↑↓/j/k=scroll"] ]
+  where
+    lpad n s = replicate (max 0 (n - length s)) ' ' <> s
+    rpad n s = s <> replicate (max 0 (n - length s)) ' '
+
 subjTypeLabel :: Api.SubjectType -> Text
 subjTypeLabel Api.Radical        = "Radical"
 subjTypeLabel Api.Kanji          = "Kanji"
@@ -377,8 +433,8 @@ stripWkTags t = T.pack (go (T.unpack t))
 handleEvent :: ([Submission] -> IO SubmitResult) -> BrickEvent Name e -> EventM Name AppState ()
 handleEvent submitFn (VtyEvent ev) = do
   st <- get
-  if stShowAllInfo st
-    then handleAllInfo ev
+  if stOverlay st /= NoOverlay
+    then handleOverlay ev
     else case stMode st of
       WrongAnswer _ _ -> handleWrongAnswer ev
       ConfirmSubmit   -> handleConfirm submitFn ev
@@ -386,16 +442,28 @@ handleEvent submitFn (VtyEvent ev) = do
       _               -> handleNormal ev
 handleEvent _ _ = pure ()
 
-handleAllInfo :: V.Event -> EventM Name AppState ()
-handleAllInfo ev =
+handleOverlay :: V.Event -> EventM Name AppState ()
+handleOverlay ev =
   case ev of
-    V.EvKey (V.KChar 'a') [V.MCtrl] -> modify $ \st -> st { stShowAllInfo = False }
-    V.EvKey V.KEsc []                -> modify $ \st -> st { stShowAllInfo = False }
-    V.EvKey V.KUp []                 -> vScrollBy (viewportScroll InfoViewport) (-1)
-    V.EvKey V.KDown []               -> vScrollBy (viewportScroll InfoViewport) 1
-    V.EvKey (V.KChar 'k') []         -> vScrollBy (viewportScroll InfoViewport) (-1)
-    V.EvKey (V.KChar 'j') []         -> vScrollBy (viewportScroll InfoViewport) 1
+    V.EvKey (V.KChar 'a') [V.MCtrl] -> close
+    V.EvKey (V.KChar 'u') [V.MCtrl] -> close
+    V.EvKey (V.KChar 'v') [V.MCtrl] -> close
+    V.EvKey V.KEsc []                -> close
+    V.EvKey V.KUp []                 -> scroll (-1)
+    V.EvKey V.KDown []               -> scroll 1
+    V.EvKey (V.KChar 'k') []         -> scroll (-1)
+    V.EvKey (V.KChar 'j') []         -> scroll 1
     _                                -> pure ()
+  where
+    close = modify $ \st -> st { stOverlay = NoOverlay }
+    scroll n = do
+      st <- get
+      let vp = case stOverlay st of
+                 AllInfo        -> viewportScroll InfoViewport
+                 UserInfo       -> viewportScroll UserViewport
+                 ReviewSchedule -> viewportScroll ReviewViewport
+                 NoOverlay      -> viewportScroll InfoViewport
+      vScrollBy vp n
 
 handleWrongAnswer :: V.Event -> EventM Name AppState ()
 handleWrongAnswer ev =
@@ -419,7 +487,11 @@ handleWrongAnswer ev =
         _ -> pure ()
 
     V.EvKey (V.KChar 'a') [V.MCtrl] ->
-      modify $ \st -> st { stShowAllInfo = True }
+      modify $ \st -> st { stOverlay = AllInfo }
+    V.EvKey (V.KChar 'u') [V.MCtrl] ->
+      modify $ \st -> st { stOverlay = UserInfo }
+    V.EvKey (V.KChar 'v') [V.MCtrl] ->
+      modify $ \st -> st { stOverlay = ReviewSchedule }
 
     V.EvKey V.KEnter [] -> do
       st <- get
@@ -463,6 +535,10 @@ handleFinished ev =
   case ev of
     V.EvKey (V.KChar 'q') [V.MCtrl] -> halt
     V.EvKey V.KEsc []               -> halt
+    V.EvKey (V.KChar 'u') [V.MCtrl] ->
+      modify $ \st -> st { stOverlay = UserInfo }
+    V.EvKey (V.KChar 'v') [V.MCtrl] ->
+      modify $ \st -> st { stOverlay = ReviewSchedule }
     V.EvKey (V.KChar 's') [V.MCtrl] -> do
       st <- get
       case stBanner st of
@@ -500,7 +576,11 @@ handleNormal ev =
         _ -> pure ()
 
     V.EvKey (V.KChar 'a') [V.MCtrl] ->
-      modify $ \st -> st { stShowAllInfo = True }
+      modify $ \st -> st { stOverlay = AllInfo }
+    V.EvKey (V.KChar 'u') [V.MCtrl] ->
+      modify $ \st -> st { stOverlay = UserInfo }
+    V.EvKey (V.KChar 'v') [V.MCtrl] ->
+      modify $ \st -> st { stOverlay = ReviewSchedule }
 
     V.EvKey V.KEsc [] ->
       halt
@@ -745,7 +825,7 @@ normalHintWidget :: Q -> AppState -> Widget Name
 normalHintWidget q st =
   hintBox $
     [ "Enter=submit", "Ctrl-o=override", "Ctrl-r=requeue"
-    , "Ctrl-a=all info", "Esc=quit"
+    , "Ctrl-a=all info", "Ctrl-u=user", "Ctrl-v=reviews", "Esc=quit"
     ] ++ [ "Ctrl-p=play audio" | hasAudio q st ]
 
 -- | Fire-and-forget audio playback via configured external player.
