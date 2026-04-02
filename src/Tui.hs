@@ -300,12 +300,6 @@ drawMode st q =
             txt ("✗ you entered: " <> shownInput)
         , withAttr (attrName "ok") $
             txt ("✓ accepted:    " <> T.pack (intercalate ", " expected))
-        , padTop (Pad 1) $
-            hintBox $
-              [ "Ctrl-o=override correct", "Ctrl-r=requeue (no penalty)"
-              , "Ctrl-a=all info", "Ctrl-u=user", "Ctrl-v=reviews"
-              , "Enter=requeue (wrong)"
-              ] ++ [ "Ctrl-p=play audio" | hasAudio q st ]
         ]
 
     Feedback msg ->
@@ -823,10 +817,17 @@ hintBox hints =
 
 normalHintWidget :: Q -> AppState -> Widget Name
 normalHintWidget q st =
-  hintBox $
-    [ "Enter=submit", "Ctrl-o=override", "Ctrl-r=requeue"
-    , "Ctrl-a=all info", "Ctrl-u=user", "Ctrl-v=reviews", "Esc=quit"
-    ] ++ [ "Ctrl-p=play audio" | hasAudio q st ]
+  case stMode st of
+    WrongAnswer _ _ ->
+      hintBox $
+        [ "Ctrl-o=override correct", "Ctrl-r=requeue (no penalty)", "Enter=requeue (wrong)"
+        , "Ctrl-a=all info", "Ctrl-u=user", "Ctrl-v=reviews"
+        ] ++ [ "Ctrl-p=play audio" | hasAudio q st ]
+    _ ->
+      hintBox $
+        [ "Enter=submit", "Ctrl-o=override", "Ctrl-r=requeue"
+        , "Ctrl-a=all info", "Ctrl-u=user", "Ctrl-v=reviews", "Esc=quit"
+        ] ++ [ "Ctrl-p=play audio" | hasAudio q st ]
 
 -- | Fire-and-forget audio playback via configured external player.
 playAudio :: Maybe String -> Api.Subject -> IO ()
