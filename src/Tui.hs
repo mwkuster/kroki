@@ -83,7 +83,7 @@ data Progress = Progress
 -- TUI state
 --------------------------------------------------------------------------------
 
-data Name = QueueList | InfoViewport | UserViewport | ReviewViewport
+data Name = QueueList | InfoViewport | UserViewport | ReviewViewport | DoneViewport
   deriving (Ord, Eq, Show)
 
 data Overlay = NoOverlay | AllInfo | UserInfo | ReviewSchedule
@@ -225,40 +225,42 @@ drawMain st
   case currentQuestion st of
     Nothing ->
       B.borderWithLabel (str "Done") $
-        padAll 1 $
-          let confirmWidgets =
-                case stMode st of
-                  ConfirmSubmit -> [padTop (Pad 1) (drawConfirmSubmit st)]
-                  _             -> []
-              detailWidgets =
-                case stSubmitDetails st of
-                  [] -> []
-                  ds -> padTop (Pad 1) (withAttr (attrName "hint") (str "--- submitted ---"))
-                      : map (withAttr (attrName "hint") . str) ds
-              bannerWidgets =
-                case stBanner st of
-                  Just msg -> [padTop (Pad 1) (txt msg)]
-                  Nothing  -> []
-              hintLine =
-                case stMode st of
-                  ConfirmSubmit ->
-                    hintBox ["y/Enter=confirm", "n/Esc=cancel"]
-                  _ | Just _ <- stBanner st ->
-                        hintBox $ ["Esc=quit", "Ctrl-u=user", "Ctrl-v=reviews"] ++
-                          [ "Ctrl-n=next batch" | stHasMore st ]
-                  _ -> hintBox ["Ctrl-s=submit to WaniKani", "Esc=quit", "Ctrl-u=user", "Ctrl-v=reviews"]
-          in vBox
-               ( [ withAttr (attrName "ok") $ str "Session finished."
-                 , str ("correct:     " <> show (stCorrect st))
-                 , str ("wrong:       " <> show (stWrong st))
-                 , str ("overridden:  " <> show (stOverridden st))
-                 , str ("submissions: " <> show (length (mkSubmissions st)))
-                 ]
-              ++ confirmWidgets
-              ++ detailWidgets
-              ++ bannerWidgets
-              ++ [ padTop (Pad 1) hintLine ]
-               )
+        viewport DoneViewport Vertical $
+          padAll 1 $
+            let confirmWidgets =
+                  case stMode st of
+                    ConfirmSubmit -> [padTop (Pad 1) (drawConfirmSubmit st)]
+                    _             -> []
+                detailWidgets =
+                  case stSubmitDetails st of
+                    [] -> []
+                    ds -> padTop (Pad 1) (withAttr (attrName "hint") (str "--- submitted ---"))
+                        : map (withAttr (attrName "hint") . str) ds
+                bannerWidgets =
+                  case stBanner st of
+                    Just msg -> [padTop (Pad 1) (txt msg)]
+                    Nothing  -> []
+                hintLine =
+                  case stMode st of
+                    ConfirmSubmit ->
+                      hintBox ["y/Enter=confirm", "n/Esc=cancel"]
+                    _ | Just _ <- stBanner st ->
+                          hintBox $ ["Esc=quit", "Ctrl-u=user", "Ctrl-v=reviews"] ++
+                            [ "Ctrl-n=next batch" | stHasMore st ] ++
+                            [ "↑↓/j/k=scroll" | not (null (stSubmitDetails st)) ]
+                    _ -> hintBox ["Ctrl-s=submit to WaniKani", "Esc=quit", "Ctrl-u=user", "Ctrl-v=reviews"]
+            in vBox
+                 ( [ withAttr (attrName "ok") $ str "Session finished."
+                   , str ("correct:     " <> show (stCorrect st))
+                   , str ("wrong:       " <> show (stWrong st))
+                   , str ("overridden:  " <> show (stOverridden st))
+                   , str ("submissions: " <> show (length (mkSubmissions st)))
+                   ]
+                ++ confirmWidgets
+                ++ detailWidgets
+                ++ bannerWidgets
+                ++ [ padTop (Pad 1) hintLine ]
+                 )
 
     Just q ->
       B.borderWithLabel (str "Current") $
@@ -523,6 +525,10 @@ handleFinished ev =
       if stHasMore st
         then put st { stWantsMore = True } >> halt
         else pure ()
+    V.EvKey V.KUp []         -> vScrollBy (viewportScroll DoneViewport) (-1)
+    V.EvKey V.KDown []       -> vScrollBy (viewportScroll DoneViewport) 1
+    V.EvKey (V.KChar 'k') [] -> vScrollBy (viewportScroll DoneViewport) (-1)
+    V.EvKey (V.KChar 'j') [] -> vScrollBy (viewportScroll DoneViewport) 1
     _                               -> pure ()
 
 handleNormal :: V.Event -> EventM Name AppState ()
