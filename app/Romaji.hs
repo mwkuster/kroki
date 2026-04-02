@@ -56,15 +56,17 @@ parseN t
   | "n'" `T.isPrefixOf` t = Just (T.drop 2 t)
   | "nn" `T.isPrefixOf` t =
       case T.uncons (T.drop 2 t) of
-        Nothing -> Just (T.drop 2 t)  -- "nn" alone → ん
-        Just _  -> Just (T.drop 1 t)  -- "nn…" → ん + second n starts next syllable
+        Nothing     -> Just (T.drop 2 t)  -- "nn" alone → ん (consume both)
+        Just (c, _)
+          | c `elem` ("aiueoy" :: String) -> Just (T.drop 1 t)  -- "nna" → ん + na
+          | otherwise                     -> Just (T.drop 2 t)  -- "nnk" → ん + k (consume both)
   | "n"  `T.isPrefixOf` t =
       case T.uncons (T.drop 1 t) of
-        Nothing      -> Just ""          -- trailing n
-        Just (c, _)  ->
+        Nothing     -> Just ""   -- trailing n
+        Just (c, _) ->
           if c `elem` ("aiueoy" :: String)
-            then Nothing                -- part of syllable: na/nya/ni...
-            else Just (T.drop 1 t)      -- n + consonant => ん
+            then Nothing               -- part of syllable: na/nya/ni...
+            else Just (T.drop 1 t)     -- n + consonant => ん
   | otherwise = Nothing
 
 matchKana :: Text -> Maybe (Text, Text)
@@ -165,8 +167,10 @@ liveParseN t
   | "n'"  `T.isPrefixOf` t = Just ("ん", T.drop 2 t)
   | "nn"  `T.isPrefixOf` t =
       case T.uncons (T.drop 2 t) of
-        Nothing -> Just ("ん", T.drop 2 t)  -- "nn" alone → ん
-        Just _  -> Just ("ん", T.drop 1 t)  -- "nn…" → ん + second n starts next syllable
+        Nothing     -> Just ("ん", T.drop 2 t)  -- "nn" alone → ん (consume both)
+        Just (c, _)
+          | c `elem` ("aiueoy" :: String) -> Just ("ん", T.drop 1 t)  -- "nna" → ん + na
+          | otherwise                     -> Just ("ん", T.drop 2 t)  -- "nnk" → ん + k (consume both)
   | "n"   `T.isPrefixOf` t =
       case T.uncons (T.drop 1 t) of
         Nothing     -> Nothing   -- trailing n: keep as pending
