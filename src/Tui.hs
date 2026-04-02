@@ -35,7 +35,7 @@ import qualified Graphics.Vty.CrossPlatform as VCP
 import Control.Monad (void)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Map.Strict as M
-import qualified Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, isJust, fromMaybe)
 import qualified Data.Vector as Vec
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -227,17 +227,8 @@ drawMain st
         padAll 1 $
           let confirmWidgets =
                 case stMode st of
-                  ConfirmSubmit ->
-                    let subs = mkSubmissions st
-                        total = length subs
-                        withMistakes =
-                          length [ () | s <- subs, subWrongMeaning s > 0 || subWrongReading s > 0 ]
-                    in [ padTop (Pad 1) $
-                           withAttr (attrName "header") $
-                             str ("Submit " <> show total <> " reviews to WaniKani? [y/N]")
-                       , str ("Items with mistakes: " <> show withMistakes)
-                       ]
-                  _ -> []
+                  ConfirmSubmit -> [padTop (Pad 1) (drawConfirmSubmit st)]
+                  _             -> []
               detailWidgets =
                 case stSubmitDetails st of
                   [] -> []
@@ -305,21 +296,7 @@ drawMode st q =
     Feedback msg ->
       withAttr (attrName "ok") $ txt msg
 
-    ConfirmSubmit ->
-      let subs = mkSubmissions st
-          total = length subs
-          withMistakes =
-            length
-              [ ()
-              | s <- subs
-              , subWrongMeaning s > 0 || subWrongReading s > 0
-              ]
-      in vBox
-          [ withAttr (attrName "header") $
-              str ("Submit " <> show total <> " reviews to WaniKani? [y/N]")
-          , padTop (Pad 1) $
-              str ("Items with mistakes: " <> show withMistakes)
-          ]
+    ConfirmSubmit -> drawConfirmSubmit st
 
     Finished ->
       vBox $
@@ -327,6 +304,18 @@ drawMode st q =
         case stBanner st of
           Just msg -> [padTop (Pad 1) (txt msg)]
           Nothing  -> []
+
+drawConfirmSubmit :: AppState -> Widget Name
+drawConfirmSubmit st =
+  let subs = mkSubmissions st
+      total = length subs
+      withMistakes = length [ () | s <- subs, subWrongMeaning s > 0 || subWrongReading s > 0 ]
+  in vBox
+      [ withAttr (attrName "header") $
+          str ("Submit " <> show total <> " reviews to WaniKani? [y/N]")
+      , padTop (Pad 1) $
+          str ("Items with mistakes: " <> show withMistakes)
+      ]
 
 drawAllInfo :: Q -> AppState -> Widget Name
 drawAllInfo q st =
@@ -343,16 +332,16 @@ drawAllInfo q st =
                  hintBox ["Ctrl-a/Esc=close", "↑↓/j/k=scroll"] ]
   where
     subj  = qSubject q
-    label = maybe "?" id (Api.subjChars subj)
+    label = fromMaybe "?" (Api.subjChars subj)
          <> " · " <> subjTypeLabel (Api.subjType subj)
 
     compSection =
-      let comps = Data.Maybe.mapMaybe (\cid -> M.lookup cid (stAllSubjects st))
+      let comps = mapMaybe (\cid -> M.lookup cid (stAllSubjects st))
                                       (Api.subjComponentIds subj)
       in case comps of
            [] -> []
            cs -> str "Components:"
-               : map (\c -> str ("  " <> T.unpack (maybe "?" id (Api.subjChars c))
+               : map (\c -> str ("  " <> T.unpack (fromMaybe "?" (Api.subjChars c))
                               <> "  " <> T.unpack (T.intercalate ", " (Api.subjMeanings c)))) cs
               ++ [str ""]
 
@@ -375,9 +364,9 @@ drawUserInfo st =
        viewport UserViewport Vertical $
          padAll 1 $
            vBox
-             [ str ("Username: " <> Api.userUsername u)
+             [ txt ("Username: " <> Api.userUsername u)
              , str ("Level:    " <> show (Api.userLevel u))
-             , str ("Profile:  " <> Api.userProfileUrl u)
+             , txt ("Profile:  " <> Api.userProfileUrl u)
              , padTop (Pad 1) $ hintBox ["Ctrl-u/Esc=close"]
              ]
 
@@ -397,14 +386,14 @@ drawReviewSchedule st =
                  withAttr (attrName "hint") $ str "Hour (local)            New   Open"
              ] ++
              map (\(hStart, newN, openN) ->
-               str ( rpad 24 (fmtHour hStart)
-                  <> lpad 3 (show newN) <> "  "
-                  <> lpad 4 (show openN) )
+               str ( rjust 24 (fmtHour hStart)
+                  <> ljust 3 (show newN) <> "  "
+                  <> ljust 4 (show openN) )
              ) rows ++
              [ padTop (Pad 1) $ hintBox ["Ctrl-v/Esc=close", "↑↓/j/k=scroll"] ]
   where
-    lpad n s = replicate (max 0 (n - length s)) ' ' <> s
-    rpad n s = s <> replicate (max 0 (n - length s)) ' '
+    ljust n s = replicate (max 0 (n - length s)) ' ' <> s
+    rjust n s = s <> replicate (max 0 (n - length s)) ' '
 
 subjTypeLabel :: Api.SubjectType -> Text
 subjTypeLabel Api.Radical        = "Radical"
@@ -456,7 +445,7 @@ handleOverlay ev =
                  AllInfo        -> viewportScroll InfoViewport
                  UserInfo       -> viewportScroll UserViewport
                  ReviewSchedule -> viewportScroll ReviewViewport
-                 NoOverlay      -> viewportScroll InfoViewport
+                 NoOverlay      -> error "scroll called with NoOverlay"
       vScrollBy vp n
 
 handleWrongAnswer :: V.Event -> EventM Name AppState ()
@@ -807,7 +796,7 @@ displayInput QMeaning t = t
 
 hasAudio :: Q -> AppState -> Bool
 hasAudio q st =
-  not (null (Api.subjAudioUrls (qSubject q))) && stAudioPlayer st /= Nothing
+  not (null (Api.subjAudioUrls (qSubject q))) && isJust (stAudioPlayer st)
 
 -- | Render a list of hint strings as auto-wrapping text.
 hintBox :: [Text] -> Widget Name
@@ -837,10 +826,10 @@ playAudio (Just cmd) subj =
     [] -> pure ()
     urls -> do
       i <- randomRIO (0, length urls - 1)
-      let url   = urls !! i
-          parts = case words cmd of { [] -> ["mpv"]; ws -> ws }
-          exe   = head parts
-          args  = tail parts
+      let url         = urls !! i
+          (exe, args) = case words cmd of
+                          []     -> ("mpv", [])
+                          (w:ws) -> (w, ws)
       void $ spawnProcess exe (args ++ [T.unpack url])
 
 normMeaning :: Text -> Text
@@ -884,7 +873,8 @@ britishToAmerican = T.unwords . map convertWord . T.words
       | "isation" `T.isSuffixOf` w                  = T.dropEnd 7 w <> "ization"
       | "ise"     `T.isSuffixOf` w
       , w `notElem` iseBlacklist                     = T.dropEnd 3 w <> "ize"
-      | "ogue"    `T.isSuffixOf` w                  = T.dropEnd 4 w <> "og"
+      | "ogue"    `T.isSuffixOf` w
+      , w `notElem` ogueBlacklist                    = T.dropEnd 4 w <> "og"
       | otherwise                                    = w
 
     ourBlacklist =
@@ -897,7 +887,11 @@ britishToAmerican = T.unwords . map convertWord . T.words
       , "supervise", "advertise", "comprise", "disguise", "arise"
       , "otherwise", "likewise", "clockwise", "lengthwise"
       , "prise", "demise", "surmise", "premise", "treatise"
-      , "precise", "concise" ]
+      , "precise", "concise"
+      , "noise", "poise", "turquoise", "tortoise", "porpoise" ]
+
+    ogueBlacklist =
+      [ "rogue", "vogue", "pirogue", "brogue" ]
 
 normReading :: Text -> Text
 normReading t =

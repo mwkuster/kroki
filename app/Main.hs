@@ -37,10 +37,10 @@ main = do
   let batchSize =
         Cli.optBatchSize opts
         <|> Config.cfgBatchSize cfg
-        <|> Just 10
+        <|> Just Config.defaultBatchSize
 
       rqAfter =
-        fromMaybe 7 (Cli.optRequeueAfter opts <|> Config.cfgRequeueAfter cfg)
+        fromMaybe Config.defaultRequeueAfter (Cli.optRequeueAfter opts <|> Config.cfgRequeueAfter cfg)
 
   case Cli.optCommand opts of
     Cli.Init -> Config.initConfig
@@ -48,9 +48,9 @@ main = do
     Cli.WhoAmI -> do
       t <- requireToken
       user <- Api.getUser t
-      putStrLn ("Username: " <> Api.userUsername user)
+      putStrLn ("Username: " <> T.unpack (Api.userUsername user))
       putStrLn ("Level:    " <> show (Api.userLevel user))
-      putStrLn ("Profile:  " <> Api.userProfileUrl user)
+      putStrLn ("Profile:  " <> T.unpack (Api.userProfileUrl user))
 
     Cli.Reviews -> do
       t <- requireToken

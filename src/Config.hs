@@ -3,14 +3,24 @@
 module Config
   ( KrokiConfig(..)
   , loadConfig
+  , parseConfig
   , initConfig
+  , defaultBatchSize
+  , defaultRequeueAfter
   ) where
 
 import Control.Exception (IOException, catch)
-import Data.Char (isSpace)
+import Data.Char (isSpace, toLower)
 import System.Directory (getXdgDirectory, XdgDirectory(XdgConfig), createDirectoryIfMissing)
 import System.FilePath ((</>))
 import System.IO (hFlush, stdout)
+
+-- | Shared default values, used both in Main and in the init wizard.
+defaultBatchSize :: Int
+defaultBatchSize = 10
+
+defaultRequeueAfter :: Int
+defaultRequeueAfter = 7
 
 data KrokiConfig = KrokiConfig
   { cfgToken :: Maybe String
@@ -39,15 +49,15 @@ parseConfig s =
 
 lookupKey :: String -> [String] -> Maybe String
 lookupKey key ls =
-  case [ drop 1 v | line <- ls
-                  , let line' = trim line
-                  , not (null line')
-                  , head line' /= '#'
-                  , (k, rest) <- [break (=='=') line']
-                  , trim k == key
-                  , let v = trim rest
-                  , not (null v)
-                  ] of
+  case [ val | line <- ls
+             , let line' = trim line
+             , not (null line')
+             , head line' /= '#'
+             , (k, rest) <- [break (=='=') line']
+             , trim k == key
+             , let val = trim (drop 1 rest)
+             , not (null val)
+             ] of
     (v:_) -> Just v
     []    -> Nothing
 
@@ -63,7 +73,6 @@ initConfig = do
 
   existing <- loadConfig
 
-  -- Check if file already exists (token present is a good proxy)
   existingRaw <- readFile path `catch` \(_ :: IOException) -> pure ""
   let fileExists = not (null (trim existingRaw))
 
@@ -83,8 +92,8 @@ initConfig = do
 writeConfigInteractive :: FilePath -> FilePath -> KrokiConfig -> IO ()
 writeConfigInteractive dir path existing = do
   token      <- prompt "WaniKani API token (required)" Nothing
-  batchSize  <- prompt "Batch size" (Just (maybe "10" show (cfgBatchSize existing)))
-  requeueAft <- prompt "Requeue after (positions)" (Just (maybe "7" show (cfgRequeueAfter existing)))
+  batchSize  <- prompt "Batch size" (Just (maybe (show defaultBatchSize)  show (cfgBatchSize existing)))
+  requeueAft <- prompt "Requeue after (positions)" (Just (maybe (show defaultRequeueAfter) show (cfgRequeueAfter existing)))
   audioPlay  <- prompt "Audio player command (leave empty to disable)" (cfgAudioPlayer existing)
 
   let lineFor key val = key <> "=" <> val
@@ -113,11 +122,6 @@ prompt label mDefault = do
     ("", Just d) -> d
     ("", Nothing) -> ""
     (v,  _)      -> v
-
-toLower :: Char -> Char
-toLower c
-  | c >= 'A' && c <= 'Z' = toEnum (fromEnum c + 32)
-  | otherwise             = c
 
 lookupInt :: String -> [String] -> Maybe Int
 lookupInt key ls =
