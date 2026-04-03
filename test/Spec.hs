@@ -3,12 +3,18 @@
 module Main (main) where
 
 import Test.Hspec
+import Data.Aeson (decode)
+import Data.ByteString.Lazy (ByteString)
 import qualified Romaji
 import qualified TuiSpec
+import qualified Config
+import qualified Api
 
 main :: IO ()
 main = hspec $ do
   TuiSpec.spec
+  configSpec
+  apiSpec
 
   describe "romajiToHiragana" $ do
 
@@ -55,8 +61,8 @@ main = hspec $ do
       it "n before vowel stays" $ Romaji.romajiToHiragana "na"     `shouldBe` "な"
       it "kanna → かんな"       $ Romaji.romajiToHiragana "kanna"  `shouldBe` "かんな"
       it "denwa → でんわ"       $ Romaji.romajiToHiragana "denwa"  `shouldBe` "でんわ"
-      it "dennwa → でんわ"      $ Romaji.romajiToHiragana "denbwa" `shouldBe` "でんわ"
       it "n'a → んあ"           $ Romaji.romajiToHiragana "n'a"    `shouldBe` "んあ"
+      it "shinnsei → しんせい"   $ Romaji.romajiToHiragana "shinnsei"    `shouldBe` "しんせい"
 
     describe "っ (small tsu / doubled consonant)" $ do
       it "kka → っか" $ Romaji.romajiToHiragana "kka"  `shouldBe` "っか"
@@ -100,3 +106,140 @@ main = hspec $ do
     describe "っ (doubled consonant)" $ do
       it "kka → っか" $ Romaji.romajiToHiraganaLive "kka" `shouldBe` "っか"
       it "kk pending" $ Romaji.romajiToHiraganaLive "kk"  `shouldBe` "っk"
+
+--------------------------------------------------------------------------------
+-- Config parsing tests
+--------------------------------------------------------------------------------
+
+configSpec :: Spec
+configSpec = describe "parseConfig" $ do
+
+  it "parses token" $
+    Config.cfgToken (Config.parseConfig "token=abc123") `shouldBe` Just "abc123"
+
+  it "parses batch_size" $
+    Config.cfgBatchSize (Config.parseConfig "batch_size=5") `shouldBe` Just 5
+
+  it "parses requeue_after" $
+    Config.cfgRequeueAfter (Config.parseConfig "requeue_after=3") `shouldBe` Just 3
+
+  it "parses audio_player with spaces in command" $
+    Config.cfgAudioPlayer (Config.parseConfig "audio_player=mpv --really-quiet")
+      `shouldBe` Just "mpv --really-quiet"
+
+  it "ignores comment lines" $
+    Config.cfgToken (Config.parseConfig "# this is a comment\ntoken=xyz") `shouldBe` Just "xyz"
+
+  it "ignores blank lines" $
+    Config.cfgToken (Config.parseConfig "\n\ntoken=abc\n\n") `shouldBe` Just "abc"
+
+  it "returns Nothing for missing key" $
+    Config.cfgToken (Config.parseConfig "") `shouldBe` Nothing
+
+  it "returns Nothing for empty value" $
+    Config.cfgToken (Config.parseConfig "token=") `shouldBe` Nothing
+
+  it "returns Nothing for malformed int" $
+    Config.cfgBatchSize (Config.parseConfig "batch_size=not_a_number") `shouldBe` Nothing
+
+  it "trims whitespace around key and value" $
+    Config.cfgToken (Config.parseConfig "  token  =  mytoken  ") `shouldBe` Just "mytoken"
+
+  it "uses first occurrence when key appears twice" $
+    Config.cfgToken (Config.parseConfig "token=first\ntoken=second") `shouldBe` Just "first"
+
+  it "defaultBatchSize is 10" $
+    Config.defaultBatchSize `shouldBe` 10
+
+  it "defaultRequeueAfter is 7" $
+    Config.defaultRequeueAfter `shouldBe` 7
+
+--------------------------------------------------------------------------------
+-- API JSON parsing tests
+--------------------------------------------------------------------------------
+
+apiSpec :: Spec
+apiSpec = describe "Api JSON parsing" $ do
+
+  describe "User" $ do
+    let innerJson :: ByteString
+        innerJson = "{\"username\":\"bob\",\"level\":5,\"profile_url\":\"https://example.com\"}"
+    let envelopeJson :: ByteString
+        envelopeJson = "{\"data\":{\"username\":\"bob\",\"level\":5,\"profile_url\":\"https://example.com\"}}"
+
+    it "parses username" $
+      fmap Api.userUsername (decode innerJson :: Maybe Api.User) `shouldBe` Just "bob"
+
+    it "parses level" $
+      fmap Api.userLevel (decode innerJson :: Maybe Api.User) `shouldBe` Just 5
+
+    it "parses profile_url" $
+      fmap Api.userProfileUrl (decode innerJson :: Maybe Api.User) `shouldBe` Just "https://example.com"
+
+    it "fails on missing required field" $
+      (decode "{\"username\":\"bob\"}" :: Maybe Api.User) `shouldBe` Nothing
+
+    it "parses full API envelope via UserEnvelope" $
+      fmap (Api.userUsername . Api.ueData) (decode envelopeJson :: Maybe Api.UserEnvelope)
+        `shouldBe` Just "bob"
+
+    it "UserEnvelope fails on missing data wrapper" $
+      (decode innerJson :: Maybe Api.UserEnvelope) `shouldBe` Nothing
+
+  describe "ReviewBucket" $ do
+    let validJson :: ByteString
+        validJson = "{\"available_at\":\"2024-01-01T00:00:00.000000Z\",\"subject_ids\":[1,2,3]}"
+
+    it "parses subject_ids" $
+      fmap Api.rbSubjectIds (decode validJson) `shouldBe` Just [1, 2, 3]
+
+    it "fails on invalid available_at" $
+      (decode "{\"available_at\":\"not-a-date\",\"subject_ids\":[]}" :: Maybe Api.ReviewBucket)
+        `shouldBe` Nothing
+
+  describe "Subject (kanji)" $ do
+    -- WaniKani omits absent optional fields rather than sending null;
+    -- aeson's .:? only yields Nothing for absent keys, not for null values
+    -- when the target type is Text.
+    let validJson :: ByteString
+        validJson = mconcat
+          [ "{\"id\":1,\"object\":\"kanji\",\"data\":{"
+          , "\"characters\":\"\\u65e5\","
+          , "\"meanings\":[{\"meaning\":\"Sun\",\"accepted_answer\":true}"
+          , ",{\"meaning\":\"Day\",\"accepted_answer\":true}],"
+          , "\"readings\":[{\"reading\":\"\\u306b\\u3061\",\"accepted_answer\":true}"
+          , ",{\"reading\":\"\\u3058\\u3064\",\"accepted_answer\":false}],"
+          , "\"component_subject_ids\":[]}}"
+          ]
+
+    it "parses subject type" $
+      fmap Api.subjType (decode validJson) `shouldBe` Just Api.Kanji
+
+    it "parses accepted meanings only" $
+      fmap Api.subjMeanings (decode validJson) `shouldBe` Just ["Sun", "Day"]
+
+    it "parses accepted readings only" $
+      fmap Api.subjReadings (decode validJson) `shouldBe` Just ["\12395\12385"]
+
+    it "parses characters" $
+      fmap Api.subjChars (decode validJson) `shouldBe` Just (Just "\26085")
+
+  describe "Subject (radical)" $ do
+    let validJson :: ByteString
+        validJson = mconcat
+          [ "{\"id\":2,\"object\":\"radical\",\"data\":{"
+          , "\"characters\":\"\\u4e00\","
+          , "\"meanings\":[{\"meaning\":\"One\",\"accepted_answer\":true}],"
+          , "\"component_subject_ids\":[]}}"
+          ]
+
+    it "has no readings" $
+      fmap Api.subjReadings (decode validJson) `shouldBe` Just []
+
+    it "has no reading mnemonic" $
+      fmap Api.subjReadingMnemonic (decode validJson) `shouldBe` Just Nothing
+
+  describe "Subject (unknown type)" $ do
+    it "fails to parse unknown object type" $
+      (decode "{\"id\":1,\"object\":\"unknown\",\"data\":{}}" :: Maybe Api.Subject)
+        `shouldBe` Nothing

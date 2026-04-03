@@ -58,7 +58,7 @@ executable kroki
     main-is:          Main.hs
 
     hs-source-dirs:  app, src
-    other-modules: Cli, Api, Config, Romaji, Tui
+    other-modules: Cli, Api, Config, Romaji, Tui, Util
     default-language: GHC2021
 
     ghc-options:
@@ -79,8 +79,6 @@ executable kroki
       , brick
       , vty
       , vector
-      , text
-      , containers
       , vty-crossplatform
       , process
 
@@ -88,7 +86,7 @@ test-suite kroki-test
     type:             exitcode-stdio-1.0
     main-is:          Spec.hs
     hs-source-dirs:   test, app, src
-    other-modules:    Romaji, Tui, Api, Config, TuiSpec
+    other-modules:    Romaji, Tui, Api, Config, TuiSpec, Util
     default-language: GHC2021
     build-depends:
         base >=4.16 && <5

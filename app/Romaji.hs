@@ -5,7 +5,7 @@ module Romaji
   , romajiToHiraganaLive
   ) where
 
-import Data.Char (isAlpha)
+import Data.Char (isAsciiLower, isAsciiUpper)
 import Data.List (find)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -15,7 +15,7 @@ import qualified Data.Text as T
 romajiToHiragana :: Text -> Text
 romajiToHiragana = go . T.toLower . T.filter keep
   where
-    keep c = isAlpha c || c == '\'' || c == '-' -- allow n' and ignore hyphens
+    keep c = isAsciiLower c || isAsciiUpper c || c == '\''
     go t
       | T.null t  = ""
       | otherwise =
@@ -56,15 +56,17 @@ parseN t
   | "n'" `T.isPrefixOf` t = Just (T.drop 2 t)
   | "nn" `T.isPrefixOf` t =
       case T.uncons (T.drop 2 t) of
-        Nothing -> Just (T.drop 2 t)  -- "nn" alone → ん
-        Just _  -> Just (T.drop 1 t)  -- "nn…" → ん + second n starts next syllable
+        Nothing     -> Just (T.drop 2 t)  -- "nn" alone → ん (consume both)
+        Just (c, _)
+          | c `elem` ("aiueoy" :: String) -> Just (T.drop 1 t)  -- "nna" → ん + na
+          | otherwise                     -> Just (T.drop 2 t)  -- "nnk" → ん + k (consume both)
   | "n"  `T.isPrefixOf` t =
       case T.uncons (T.drop 1 t) of
-        Nothing      -> Just ""          -- trailing n
-        Just (c, _)  ->
+        Nothing     -> Just ""   -- trailing n
+        Just (c, _) ->
           if c `elem` ("aiueoy" :: String)
-            then Nothing                -- part of syllable: na/nya/ni...
-            else Just (T.drop 1 t)      -- n + consonant => ん
+            then Nothing               -- part of syllable: na/nya/ni...
+            else Just (T.drop 1 t)     -- n + consonant => ん
   | otherwise = Nothing
 
 matchKana :: Text -> Maybe (Text, Text)
@@ -93,7 +95,6 @@ table =
   , ("kwi","くぃ"),("kwe","くぇ"),("kwo","くぉ")
   , ("gwi","ぐぃ"),("gwe","ぐぇ"),("gwo","ぐぉ")
 
-  , ("kya","きゃ") -- (harmless redundancy if you edit table later)
   ]
   ++ basicRows
 
@@ -138,7 +139,7 @@ romajiToHiraganaLive input =
       (kana, pend)  = liveConvert t
   in kana <> pend
   where
-    keep c = isAlpha c || c == '\''
+    keep c = isAsciiLower c || isAsciiUpper c || c == '\''
 
 liveConvert :: Text -> (Text, Text)
 liveConvert t
@@ -166,8 +167,10 @@ liveParseN t
   | "n'"  `T.isPrefixOf` t = Just ("ん", T.drop 2 t)
   | "nn"  `T.isPrefixOf` t =
       case T.uncons (T.drop 2 t) of
-        Nothing -> Just ("ん", T.drop 2 t)  -- "nn" alone → ん
-        Just _  -> Just ("ん", T.drop 1 t)  -- "nn…" → ん + second n starts next syllable
+        Nothing     -> Just ("ん", T.drop 2 t)  -- "nn" alone → ん (consume both)
+        Just (c, _)
+          | c `elem` ("aiueoy" :: String) -> Just ("ん", T.drop 1 t)  -- "nna" → ん + na
+          | otherwise                     -> Just ("ん", T.drop 2 t)  -- "nnk" → ん + k (consume both)
   | "n"   `T.isPrefixOf` t =
       case T.uncons (T.drop 1 t) of
         Nothing     -> Nothing   -- trailing n: keep as pending

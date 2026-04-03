@@ -2,6 +2,7 @@
 
 module Api
   ( User(..)
+  , UserEnvelope(..)
   , getUser
 
   , Summary(..)
@@ -26,7 +27,7 @@ import Data.Aeson.Types (Parser)
 import qualified Data.Aeson.Key as Key
 import Data.Aeson (object, (.=))
 import Data.List (sortOn)
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (UTCTime(..), addUTCTime)
@@ -36,33 +37,34 @@ import qualified Data.ByteString.Char8 as BS8
 import Network.HTTP.Req
 
 --------------------------------------------------------------------------------
+-- Shared API options
+--------------------------------------------------------------------------------
+
+-- | Standard auth + revision headers, shared by all API calls.
+apiOpts :: String -> Option scheme
+apiOpts token =
+  header "Authorization" ("Bearer " <> BS8.pack token)
+  <> header "Wanikani-Revision" "20170710"
+
+--------------------------------------------------------------------------------
 -- User
 --------------------------------------------------------------------------------
 
 data User = User
-  { userUsername   :: String
+  { userUsername   :: Text
   , userLevel      :: Int
-  , userProfileUrl :: String
+  , userProfileUrl :: Text
   } deriving (Show, Eq)
 
-newtype UserEnvelope = UserEnvelope { ueData :: UserData } deriving (Show)
+instance FromJSON User where
+  parseJSON = withObject "User" $ \o ->
+    User <$> o .: "username" <*> o .: "level" <*> o .: "profile_url"
 
-data UserData = UserData
-  { udUsername   :: Text
-  , udLevel      :: Int
-  , udProfileUrl :: Text
-  } deriving (Show)
+newtype UserEnvelope = UserEnvelope { ueData :: User } deriving (Show, Eq)
 
 instance FromJSON UserEnvelope where
   parseJSON = withObject "UserEnvelope" $ \o ->
     UserEnvelope <$> o .: "data"
-
-instance FromJSON UserData where
-  parseJSON = withObject "UserData" $ \o ->
-    UserData
-      <$> o .: "username"
-      <*> o .: "level"
-      <*> o .: "profile_url"
 
 data KrokiError
   = ApiDecodeError Text
@@ -72,24 +74,13 @@ instance Exception KrokiError
 
 getUser :: String -> IO User
 getUser token = runReq defaultHttpConfig $ do
-  let authHeader = header "Authorization" ("Bearer " <> BS8.pack token)
-      revHeader  = header "Wanikani-Revision" "20170710"
-
   resp <- req
     GET
     (https "api.wanikani.com" /: "v2" /: "user")
     NoReqBody
     jsonResponse
-    (authHeader <> revHeader)
-
-  let env = responseBody resp :: UserEnvelope
-      u   = ueData env
-
-  pure User
-    { userUsername   = T.unpack (udUsername u)
-    , userLevel      = udLevel u
-    , userProfileUrl = T.unpack (udProfileUrl u)
-    }
+    (apiOpts token)
+  pure (ueData (responseBody resp :: UserEnvelope))
 
 --------------------------------------------------------------------------------
 -- Summary (reviews timeline)
@@ -122,16 +113,12 @@ instance FromJSON ReviewBucket where
 
 getSummary :: String -> IO Summary
 getSummary token = runReq defaultHttpConfig $ do
-  let authHeader = header "Authorization" ("Bearer " <> BS8.pack token)
-      revHeader  = header "Wanikani-Revision" "20170710"
-
   resp <- req
     GET
     (https "api.wanikani.com" /: "v2" /: "summary")
     NoReqBody
     jsonResponse
-    (authHeader <> revHeader)
-
+    (apiOpts token)
   let env = responseBody resp :: SummaryEnvelope
   pure (seData env)
 
@@ -220,9 +207,7 @@ toAssignment (AssignmentData i s) = Assignment i s
 
 getAvailableAssignments :: String -> UTCTime -> Int -> IO [Assignment]
 getAvailableAssignments token now n = runReq defaultHttpConfig $ do
-  let authHeader = header "Authorization" ("Bearer " <> BS8.pack token)
-      revHeader  = header "Wanikani-Revision" "20170710"
-      nowParam   = T.pack (iso8601Show now)
+  let nowParam = T.pack (iso8601Show now)
 
   resp <- req
     GET
@@ -232,7 +217,7 @@ getAvailableAssignments token now n = runReq defaultHttpConfig $ do
     ( "available_before" =: nowParam
    <> "in_review"        =: True
    <> "hidden"           =: False
-   <> authHeader <> revHeader )
+   <> apiOpts token )
 
   let env = responseBody resp :: AssignmentsEnvelope
       as  = map toAssignment (aeData env)
@@ -279,12 +264,13 @@ instance FromJSON Subject where
 
     meanings <- d .: "meanings" >>= parseAccepted "meaning"
     readings <- case st of
-      Radical        -> pure []
-      _              -> (d .:? "readings" >>= maybe (pure []) (parseAccepted "reading"))
+      Radical -> pure []
+      _       -> d .:? "readings" >>= maybe (pure []) (parseAccepted "reading")
 
+    let fetchAudio = maybe [] (map paUrl) <$> (d .:? "pronunciation_audios")
     audioUrls <- case st of
-      Vocabulary     -> maybe [] (map paUrl) <$> (d .:? "pronunciation_audios")
-      KanaVocabulary -> maybe [] (map paUrl) <$> (d .:? "pronunciation_audios")
+      Vocabulary     -> fetchAudio
+      KanaVocabulary -> fetchAudio
       _              -> pure []
 
     mmnem   <- d .:? "meaning_mnemonic"
@@ -293,7 +279,7 @@ instance FromJSON Subject where
       _       -> d .:? "reading_mnemonic"
     compIds <- case st of
       Radical -> pure []
-      _       -> maybe [] id <$> (d .:? "component_subject_ids")
+      _       -> fromMaybe [] <$> (d .:? "component_subject_ids")
 
     pure Subject
       { subjId              = sid
@@ -340,17 +326,14 @@ getSubjectsByIds token ids = do
 
 getChunk :: String -> [Int] -> IO [Subject]
 getChunk token idsChunk = runReq defaultHttpConfig $ do
-  let authHeader = header "Authorization" ("Bearer " <> BS8.pack token)
-      revHeader  = header "Wanikani-Revision" "20170710"
-      idsParam   = T.intercalate "," (map (T.pack . show) idsChunk)
+  let idsParam = T.intercalate "," (map (T.pack . show) idsChunk)
 
   resp <- req
     GET
     (https "api.wanikani.com" /: "v2" /: "subjects")
     NoReqBody
     jsonResponse
-    ( "ids" =: idsParam
-   <> authHeader <> revHeader )
+    ( "ids" =: idsParam <> apiOpts token )
 
   let env = responseBody resp :: SubjectsEnvelope
   pure (suData env)
@@ -367,10 +350,7 @@ chunkN n0 = go
 createReview :: String -> Int -> Int -> Int -> UTCTime -> IO ()
 createReview token assignmentId wrongMeaning wrongReading createdAt =
   runReq defaultHttpConfig $ do
-    let authHeader = header "Authorization" ("Bearer " <> BS8.pack token)
-        revHeader  = header "Wanikani-Revision" "20170710"
-
-        body =
+    let body =
           object
             [ "review" .= object
                 [ "assignment_id"             .= assignmentId
@@ -385,6 +365,6 @@ createReview token assignmentId wrongMeaning wrongReading createdAt =
       (https "api.wanikani.com" /: "v2" /: "reviews")
       (ReqBodyJson body)
       ignoreResponse
-      (authHeader <> revHeader)
+      (apiOpts token)
 
     pure ()

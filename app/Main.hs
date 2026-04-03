@@ -4,9 +4,9 @@ import qualified Cli
 import qualified Api
 import qualified Config
 import qualified Tui
+import Util (strPadLeft, strPadRight)
 
 import Control.Applicative ((<|>))
-import Control.Monad (when)
 import System.Environment (lookupEnv)
 import System.Exit (die)
 
@@ -29,30 +29,24 @@ main = do
         <|> envToken
         <|> Config.cfgToken cfg
 
-  t <- maybe
-        (die "Missing API token. Provide --token, set WANIKANI_API_TOKEN, or put token=... into ~/.config/kroki/config")
-        pure
-        token
-
-  let verbose = Cli.optVerbose opts
-      logInfo  = when verbose . putStrLn
-
-      batchSize =
-        Cli.optBatchSize opts
-        <|> Config.cfgBatchSize cfg
-        <|> Just 10
-
-      rqAfter =
-        fromMaybe 7 (Cli.optRequeueAfter opts <|> Config.cfgRequeueAfter cfg)
+  let requireToken =
+        maybe
+          (die "Missing API token. Provide --token, set WANIKANI_API_TOKEN, or put token=... into ~/.config/kroki/config")
+          pure
+          token
 
   case Cli.optCommand opts of
+    Cli.Init -> Config.initConfig
+
     Cli.WhoAmI -> do
+      t <- requireToken
       user <- Api.getUser t
-      putStrLn ("Username: " <> Api.userUsername user)
+      putStrLn ("Username: " <> T.unpack (Api.userUsername user))
       putStrLn ("Level:    " <> show (Api.userLevel user))
-      putStrLn ("Profile:  " <> Api.userProfileUrl user)
+      putStrLn ("Profile:  " <> T.unpack (Api.userProfileUrl user))
 
     Cli.Reviews -> do
+      t <- requireToken
       now <- getCurrentTime
       tz  <- getCurrentTimeZone
       summary <- Api.getSummary t
@@ -68,19 +62,32 @@ main = do
       mapM_
         (\(hStart, newN, openN) ->
           putStrLn
-            ( padRight 20 (fmtHour hStart) <> "  "
-           <> padLeft 3 (show newN) <> "  "
-           <> padLeft 4 (show openN)
+            ( strPadRight 20 (fmtHour hStart) <> "  "
+           <> strPadLeft 3 (show newN) <> "  "
+           <> strPadLeft 4 (show openN)
             )
         )
         rows
 
-    Cli.Study -> do
-      let n = fromMaybe 10 batchSize
+    Cli.Study studyOpts -> do
+      t <- requireToken
+      let batchSize =
+            Cli.studyBatchSize studyOpts
+            <|> Config.cfgBatchSize cfg
+            <|> Just Config.defaultBatchSize
+          rqAfter =
+            fromMaybe Config.defaultRequeueAfter
+              (Cli.studyRequeueAfter studyOpts <|> Config.cfgRequeueAfter cfg)
+          raw = fromMaybe 10 batchSize
+          n   = if raw == 0 then maxBound else raw
+      now  <- getCurrentTime
+      tz   <- getCurrentTimeZone
+      user <- Api.getUser t
+      summary <- Api.getSummary t
 
-          runBatch = do
-            now <- getCurrentTime
-            as  <- Api.getAvailableAssignments t now n
+      let runBatch = do
+            now2 <- getCurrentTime
+            as   <- Api.getAvailableAssignments t now2 n
             if null as
               then putStrLn "No reviews available right now."
               else do
@@ -95,40 +102,31 @@ main = do
                       | subj <- subjects
                       , Just asgId <- [M.lookup (Api.subjId subj) subjToAsg]
                       ]
-                logInfo ("Batch: " <> show (length subjects) <> " items (max " <> show n <> ")")
                 let audioPlayer = Config.cfgAudioPlayer cfg
-                wantsMore <- Tui.runStudyTui rqAfter audioPlayer allSubjMap subjToAsg subjects (submitBatch asgToSubj)
+                wantsMore <- Tui.runStudyTui rqAfter audioPlayer user summary now tz allSubjMap subjToAsg subjects (submitBatch asgToSubj)
                 if wantsMore then runBatch else pure ()
 
-          submitBatch asgToSubj subs =
-            do
-              let details = map (fmtSub asgToSubj) subs
-              if not (Cli.optSubmit opts)
-                then pure Tui.SubmitResult
-                  { Tui.srMessage = "Run with --submit to actually commit results."
-                  , Tui.srHasMore = False
-                  , Tui.srDetails = details
-                  }
-                else do
-                  ts <- getCurrentTime
-                  mapM_
-                    (\s ->
-                      Api.createReview t
-                        (Tui.subAssignmentId s)
-                        (Tui.subWrongMeaning s)
-                        (Tui.subWrongReading s)
-                        ts
-                    )
-                    subs
-                  now2     <- getCurrentTime
-                  summary2 <- Api.getSummary t
-                  as2      <- Api.getAvailableAssignments t now2 n
-                  pure Tui.SubmitResult
-                    { Tui.srMessage = "Submitted. Reviews available now: "
-                                   <> show (Api.reviewsAvailableNow now2 summary2)
-                    , Tui.srHasMore = not (null as2)
-                    , Tui.srDetails = details
-                    }
+          submitBatch asgToSubj subs = do
+            let details = map (fmtSub asgToSubj) subs
+            ts <- getCurrentTime
+            mapM_
+              (\s ->
+                Api.createReview t
+                  (Tui.subAssignmentId s)
+                  (Tui.subWrongMeaning s)
+                  (Tui.subWrongReading s)
+                  ts
+              )
+              subs
+            now2     <- getCurrentTime
+            summary2 <- Api.getSummary t
+            as2      <- Api.getAvailableAssignments t now2 n
+            pure Tui.SubmitResult
+              { Tui.srMessage = "Submitted. Reviews available now: "
+                             <> show (Api.reviewsAvailableNow now2 summary2)
+              , Tui.srHasMore = not (null as2)
+              , Tui.srDetails = details
+              }
 
       runBatch
 
@@ -143,7 +141,7 @@ fmtSub asgToSubj s =
         | otherwise = "incorrect"
                    <> " (meaning wrong: " <> show (Tui.subWrongMeaning s)
                    <> ", reading wrong: " <> show (Tui.subWrongReading s) <> ")"
-  in padRight 30 name <> "  " <> status
+  in strPadRight 30 name <> "  " <> status
 
 subjLabel :: Api.Subject -> String
 subjLabel subj =
@@ -155,8 +153,3 @@ subjLabel subj =
                   []    -> "?"
   in if null chars then meaning else chars <> " (" <> meaning <> ")"
 
-padLeft :: Int -> String -> String
-padLeft n s = replicate (max 0 (n - length s)) ' ' <> s
-
-padRight :: Int -> String -> String
-padRight n s = s <> replicate (max 0 (n - length s)) ' '

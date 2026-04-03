@@ -6,6 +6,8 @@ import Test.Hspec
 import qualified Data.Map.Strict as M
 import qualified Data.Vector as Vec
 import qualified Brick.Widgets.List as L
+import Data.Time (UTCTime(..), fromGregorian, secondsToDiffTime)
+import Data.Time.LocalTime (utc)
 
 import qualified Api
 import qualified Tui
@@ -77,8 +79,12 @@ stateWith prog subjToAsg = Tui.AppState
   , Tui.stWantsMore    = False
   , Tui.stAudioPlayer   = Nothing
   , Tui.stSubmitDetails = []
-  , Tui.stShowAllInfo   = False
+  , Tui.stOverlay       = Tui.NoOverlay
   , Tui.stAllSubjects   = M.empty
+  , Tui.stUser          = Api.User { Api.userUsername = "test", Api.userLevel = 1, Api.userProfileUrl = "" }
+  , Tui.stSummary       = Api.Summary { Api.summaryReviews = [] }
+  , Tui.stNow           = UTCTime (fromGregorian 2024 1 1) (secondsToDiffTime 0)
+  , Tui.stTZ            = utc
   }
 
 --------------------------------------------------------------------------------
@@ -119,6 +125,10 @@ spec = do
       Tui.normReading "NICHI" `shouldBe` "にち"
     it "trims whitespace" $
       Tui.normReading "  にち  " `shouldBe` "にち"
+    it "romaji with doubled consonant" $
+      Tui.normReading "gakkou" `shouldBe` "がっこう"
+    it "romaji with apostrophe (n')" $
+      Tui.normReading "n'a" `shouldBe` "んあ"
 
   describe "checkAnswer" $ do
 
@@ -141,8 +151,32 @@ spec = do
         fst (Tui.checkAnswer (mkQ kanjiSubj Tui.QReading) "nichi") `shouldBe` True
       it "rejects wrong reading" $
         fst (Tui.checkAnswer (mkQ kanjiSubj Tui.QReading) "ka") `shouldBe` False
+      it "returns accepted readings on failure" $
+        snd (Tui.checkAnswer (mkQ kanjiSubj Tui.QReading) "ka") `shouldBe` ["にち", "じつ"]
       it "accepts vocab reading" $
         fst (Tui.checkAnswer (mkQ vocabSubj Tui.QReading) "gakkou") `shouldBe` True
+
+    describe "british spelling normalisation" $ do
+      let britSubj = kanjiSubj { Api.subjMeanings = ["Color"] }
+      it "user types british, accepted is american" $
+        fst (Tui.checkAnswer (mkQ britSubj Tui.QMeaning) "colour") `shouldBe` True
+      let britSubj2 = kanjiSubj { Api.subjMeanings = ["Colour"] }
+      it "user types american, accepted is british" $
+        fst (Tui.checkAnswer (mkQ britSubj2 Tui.QMeaning) "color") `shouldBe` True
+
+    describe "radical (meaning only)" $ do
+      it "accepts radical meaning" $
+        fst (Tui.checkAnswer (mkQ radicalSubj Tui.QMeaning) "one") `shouldBe` True
+      it "rejects wrong meaning" $
+        fst (Tui.checkAnswer (mkQ radicalSubj Tui.QMeaning) "two") `shouldBe` False
+
+    describe "empty input" $ do
+      it "rejects empty meaning" $
+        fst (Tui.checkAnswer (mkQ kanjiSubj Tui.QMeaning) "") `shouldBe` False
+      it "rejects empty reading" $
+        fst (Tui.checkAnswer (mkQ kanjiSubj Tui.QReading) "") `shouldBe` False
+      it "rejects whitespace-only meaning" $
+        fst (Tui.checkAnswer (mkQ kanjiSubj Tui.QMeaning) "   ") `shouldBe` False
 
   describe "requeueAfterK" $ do
     let qs = map (\n -> mkQ kanjiSubj { Api.subjId = n } Tui.QMeaning) [1..5]
@@ -158,6 +192,9 @@ spec = do
       last (Tui.requeueAfterK 100 q0 qs) `shouldBe` q0
     it "empty queue returns singleton" $
       Tui.requeueAfterK 3 q0 [] `shouldBe` [q0]
+    it "negative k treated as 0 (front)" $
+      Api.subjId (Tui.qSubject (head (Tui.requeueAfterK (-1) q0 qs)))
+        `shouldBe` Api.subjId kanjiSubj
 
   describe "requeueOnly" $ do
     let q0   = mkQ kanjiSubj Tui.QMeaning
@@ -194,6 +231,10 @@ spec = do
       Tui.pReadingNeeded (Tui.initProgress kanjiSubj) `shouldBe` True
     it "radical does not need reading" $
       Tui.pReadingNeeded (Tui.initProgress radicalSubj) `shouldBe` False
+    it "vocab with readings needs reading" $
+      Tui.pReadingNeeded (Tui.initProgress vocabSubj) `shouldBe` True
+    it "kanji with no readings does not need reading" $
+      Tui.pReadingNeeded (Tui.initProgress (kanjiSubj { Api.subjReadings = [] })) `shouldBe` False
     it "starts with nothing correct" $ do
       let p = Tui.initProgress kanjiSubj
       Tui.pMeaningOk p `shouldBe` False
@@ -214,6 +255,14 @@ spec = do
       let result = Tui.markOk kanjiSubj Tui.QReading prog0
       Tui.pReadingOk (result M.! 1) `shouldBe` True
 
+    it "marking meaning ok does not affect readingOk" $ do
+      let result = Tui.markOk kanjiSubj Tui.QMeaning prog0
+      Tui.pReadingOk (result M.! 1) `shouldBe` False
+
+    it "marking reading ok does not affect meaningOk" $ do
+      let result = Tui.markOk kanjiSubj Tui.QReading prog0
+      Tui.pMeaningOk (result M.! 1) `shouldBe` False
+
     it "does not affect other subjects" $
       M.lookup 99 (Tui.markOk kanjiSubj Tui.QMeaning prog0) `shouldBe` Nothing
 
@@ -224,6 +273,10 @@ spec = do
       Tui.pMeaningWrong (Tui.incWrong kanjiSubj Tui.QMeaning prog0 M.! 1) `shouldBe` 1
     it "increments reading wrong count" $
       Tui.pReadingWrong (Tui.incWrong kanjiSubj Tui.QReading prog0 M.! 1) `shouldBe` 1
+    it "meaning wrong does not affect reading wrong" $
+      Tui.pReadingWrong (Tui.incWrong kanjiSubj Tui.QMeaning prog0 M.! 1) `shouldBe` 0
+    it "reading wrong does not affect meaning wrong" $
+      Tui.pMeaningWrong (Tui.incWrong kanjiSubj Tui.QReading prog0 M.! 1) `shouldBe` 0
     it "accumulates multiple wrongs" $ do
       let result = ( Tui.incWrong kanjiSubj Tui.QMeaning
                    . Tui.incWrong kanjiSubj Tui.QMeaning
@@ -258,3 +311,9 @@ spec = do
       let prog = M.singleton 99 (Tui.initProgress (kanjiSubj { Api.subjId = 99 }))
           subs = Tui.mkSubmissions (stateWith prog subjToAsg)
       subs `shouldBe` []
+
+    it "includes subject with zero wrong counts" $ do
+      let prog  = M.singleton 1 (Tui.initProgress kanjiSubj)
+          [sub] = Tui.mkSubmissions (stateWith prog subjToAsg)
+      Tui.subWrongMeaning sub `shouldBe` 0
+      Tui.subWrongReading sub `shouldBe` 0

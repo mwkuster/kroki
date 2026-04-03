@@ -6,11 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 cabal build
+cabal run kroki            # starts a study session (default)
 cabal run kroki -- --help
 cabal run kroki -- whoami
 cabal run kroki -- reviews
 cabal run kroki -- study --batch-size 5
-cabal run kroki -- study --batch-size 5 --submit
 ```
 
 Token resolution order: `--token` flag → `WANIKANI_API_TOKEN` env var → `~/.config/kroki/config`
@@ -46,6 +46,8 @@ This is a WaniKani (kanji/vocabulary SRS) CLI+TUI app. The study flow:
 - `Ctrl-o` — override as correct
 - `Ctrl-r` — requeue question later (no penalty)
 - `Ctrl-a` — show all info overlay (components, meanings, readings, mnemonics); ↑↓/j/k to scroll, Ctrl-a/Esc to close
+- `Ctrl-u` — show user info overlay (username, level, profile URL)
+- `Ctrl-v` — show review schedule overlay (next 24h); ↑↓/j/k to scroll, Ctrl-v/Esc to close
 - `Ctrl-p` — play pronunciation audio (vocabulary, requires `audio_player` in config)
 - `Ctrl-s` — submit batch to WaniKani
 - `Esc`/`Ctrl-q` — quit

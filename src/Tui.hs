@@ -9,6 +9,7 @@ module Tui
   , Progress(..)
   , AppState(..)
   , Mode(..)
+  , Overlay(..)
   , Name(..)
   , checkAnswer
   , normMeaning
@@ -23,6 +24,7 @@ module Tui
 
 import qualified Api
 import qualified Romaji
+import Util (strPadLeft, strPadRight)
 
 import Brick
 import qualified Brick.Widgets.Border as B
@@ -34,11 +36,14 @@ import qualified Graphics.Vty.CrossPlatform as VCP
 import Control.Monad (void)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Map.Strict as M
-import qualified Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, isJust, fromMaybe)
 import qualified Data.Vector as Vec
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.List (intercalate)
+import Data.Time (UTCTime, utcToLocalTime)
+import Data.Time.Format (defaultTimeLocale, formatTime)
+import Data.Time.LocalTime (TimeZone)
 import System.Process (spawnProcess)
 import System.Random (randomRIO)
 
@@ -78,8 +83,11 @@ data Progress = Progress
 -- TUI state
 --------------------------------------------------------------------------------
 
-data Name = QueueList | InfoViewport
+data Name = QueueList | InfoViewport | UserViewport | ReviewViewport | DoneViewport
   deriving (Ord, Eq, Show)
+
+data Overlay = NoOverlay | AllInfo | UserInfo | ReviewSchedule
+  deriving (Show, Eq)
 
 data Mode
   = Normal
@@ -103,18 +111,22 @@ data AppState = AppState
   , stBanner       :: Maybe Text
   , stHasMore      :: Bool
   , stWantsMore    :: Bool
-  , stAudioPlayer   :: Maybe String         -- command to play audio (e.g. "mpv --really-quiet")
-  , stSubmitDetails :: [String]             -- per-submission lines shown after submit
-  , stShowAllInfo   :: Bool                 -- Ctrl-a overlay
+  , stAudioPlayer   :: Maybe String          -- command to play audio (e.g. "mpv --really-quiet")
+  , stSubmitDetails :: [String]              -- per-submission lines shown after submit
+  , stOverlay       :: Overlay               -- active info overlay
   , stAllSubjects   :: M.Map Int Api.Subject -- full subject map incl. components
+  , stUser          :: Api.User
+  , stSummary       :: Api.Summary
+  , stNow           :: UTCTime
+  , stTZ            :: TimeZone
   }
 
 --------------------------------------------------------------------------------
 -- Entry point
 --------------------------------------------------------------------------------
 
-runStudyTui :: Int -> Maybe String -> M.Map Int Api.Subject -> M.Map Int Int -> [Api.Subject] -> ([Submission] -> IO SubmitResult) -> IO Bool
-runStudyTui rqAfter audioPlayer allSubjects subjToAsg subjects submitFn = do
+runStudyTui :: Int -> Maybe String -> Api.User -> Api.Summary -> UTCTime -> TimeZone -> M.Map Int Api.Subject -> M.Map Int Int -> [Api.Subject] -> ([Submission] -> IO SubmitResult) -> IO Bool
+runStudyTui rqAfter audioPlayer user summary now tz allSubjects subjToAsg subjects submitFn = do
   let queue0 = concatMap mkQuestions subjects
       prog0  = M.fromList [ (Api.subjId s, initProgress s) | s <- subjects ]
 
@@ -136,8 +148,12 @@ runStudyTui rqAfter audioPlayer allSubjects subjToAsg subjects submitFn = do
         , stWantsMore     = False
         , stAudioPlayer   = audioPlayer
         , stSubmitDetails = []
-        , stShowAllInfo   = False
+        , stOverlay       = NoOverlay
         , stAllSubjects   = allSubjects
+        , stUser          = user
+        , stSummary       = summary
+        , stNow           = now
+        , stTZ            = tz
         }
 
   let buildVty = VCP.mkVty V.defaultConfig
@@ -199,57 +215,52 @@ drawQueueItem _ q =
 
 drawMain :: AppState -> Widget Name
 drawMain st
-  | stShowAllInfo st =
+  | stOverlay st == AllInfo =
       case currentQuestion st of
         Just q  -> drawAllInfo q st
         Nothing -> emptyWidget
+  | stOverlay st == UserInfo       = drawUserInfo st
+  | stOverlay st == ReviewSchedule = drawReviewSchedule st
   | otherwise =
   case currentQuestion st of
     Nothing ->
       B.borderWithLabel (str "Done") $
-        padAll 1 $
-          let confirmWidgets =
-                case stMode st of
-                  ConfirmSubmit ->
-                    let subs = mkSubmissions st
-                        total = length subs
-                        withMistakes =
-                          length [ () | s <- subs, subWrongMeaning s > 0 || subWrongReading s > 0 ]
-                    in [ padTop (Pad 1) $
-                           withAttr (attrName "header") $
-                             str ("Submit " <> show total <> " reviews to WaniKani? [y/N]")
-                       , str ("Items with mistakes: " <> show withMistakes)
-                       ]
-                  _ -> []
-              detailWidgets =
-                case stSubmitDetails st of
-                  [] -> []
-                  ds -> padTop (Pad 1) (withAttr (attrName "hint") (str "--- submitted ---"))
-                      : map (withAttr (attrName "hint") . str) ds
-              bannerWidgets =
-                case stBanner st of
-                  Just msg -> [padTop (Pad 1) (txt msg)]
-                  Nothing  -> []
-              hintLine =
-                case stMode st of
-                  ConfirmSubmit ->
-                    hintBox ["y/Enter=confirm", "n/Esc=cancel"]
-                  _ | Just _ <- stBanner st ->
-                        hintBox $ ["Esc=quit"] ++
-                          [ "Ctrl-n=next batch" | stHasMore st ]
-                  _ -> hintBox ["Ctrl-s=submit to WaniKani", "Esc=quit"]
-          in vBox
-               ( [ withAttr (attrName "ok") $ str "Session finished."
-                 , str ("correct:     " <> show (stCorrect st))
-                 , str ("wrong:       " <> show (stWrong st))
-                 , str ("overridden:  " <> show (stOverridden st))
-                 , str ("submissions: " <> show (length (mkSubmissions st)))
-                 ]
-              ++ confirmWidgets
-              ++ detailWidgets
-              ++ bannerWidgets
-              ++ [ padTop (Pad 1) hintLine ]
-               )
+        viewport DoneViewport Vertical $
+          padAll 1 $
+            let confirmWidgets =
+                  case stMode st of
+                    ConfirmSubmit -> [padTop (Pad 1) (drawConfirmSubmit st)]
+                    _             -> []
+                detailWidgets =
+                  case stSubmitDetails st of
+                    [] -> []
+                    ds -> padTop (Pad 1) (withAttr (attrName "hint") (str "--- submitted ---"))
+                        : map (withAttr (attrName "hint") . str) ds
+                bannerWidgets =
+                  case stBanner st of
+                    Just msg -> [padTop (Pad 1) (txt msg)]
+                    Nothing  -> []
+                hintLine =
+                  case stMode st of
+                    ConfirmSubmit ->
+                      hintBox ["y/Enter=confirm", "n/Esc=cancel"]
+                    _ | Just _ <- stBanner st ->
+                          hintBox $ ["Esc=quit", "Ctrl-u=user", "Ctrl-v=reviews"] ++
+                            [ "Ctrl-n=next batch" | stHasMore st ] ++
+                            [ "↑↓/j/k=scroll" | not (null (stSubmitDetails st)) ]
+                    _ -> hintBox ["Ctrl-s=submit to WaniKani", "Esc=quit", "Ctrl-u=user", "Ctrl-v=reviews"]
+            in vBox
+                 ( [ withAttr (attrName "ok") $ str "Session finished."
+                   , str ("correct:     " <> show (stCorrect st))
+                   , str ("wrong:       " <> show (stWrong st))
+                   , str ("overridden:  " <> show (stOverridden st))
+                   , str ("submissions: " <> show (length (mkSubmissions st)))
+                   ]
+                ++ confirmWidgets
+                ++ detailWidgets
+                ++ bannerWidgets
+                ++ [ padTop (Pad 1) hintLine ]
+                 )
 
     Just q ->
       B.borderWithLabel (str "Current") $
@@ -283,38 +294,24 @@ drawMode st q =
             txt ("✗ you entered: " <> shownInput)
         , withAttr (attrName "ok") $
             txt ("✓ accepted:    " <> T.pack (intercalate ", " expected))
-        , padTop (Pad 1) $
-            hintBox $
-              [ "Ctrl-o=override correct", "Ctrl-r=requeue (no penalty)"
-              , "Ctrl-a=all info", "Enter=requeue (wrong)"
-              ] ++ [ "Ctrl-p=play audio" | hasAudio q st ]
         ]
 
     Feedback msg ->
       withAttr (attrName "ok") $ txt msg
 
-    ConfirmSubmit ->
-      let subs = mkSubmissions st
-          total = length subs
-          withMistakes =
-            length
-              [ ()
-              | s <- subs
-              , subWrongMeaning s > 0 || subWrongReading s > 0
-              ]
-      in vBox
-          [ withAttr (attrName "header") $
-              str ("Submit " <> show total <> " reviews to WaniKani? [y/N]")
-          , padTop (Pad 1) $
-              str ("Items with mistakes: " <> show withMistakes)
-          ]
+    _ -> emptyWidget
 
-    Finished ->
-      vBox $
-        [ withAttr (attrName "ok") $ str "Finished." ] ++
-        case stBanner st of
-          Just msg -> [padTop (Pad 1) (txt msg)]
-          Nothing  -> []
+drawConfirmSubmit :: AppState -> Widget Name
+drawConfirmSubmit st =
+  let subs = mkSubmissions st
+      total = length subs
+      withMistakes = length [ () | s <- subs, subWrongMeaning s > 0 || subWrongReading s > 0 ]
+  in vBox
+      [ withAttr (attrName "header") $
+          str ("Submit " <> show total <> " reviews to WaniKani? [y/N]")
+      , padTop (Pad 1) $
+          str ("Items with mistakes: " <> show withMistakes)
+      ]
 
 drawAllInfo :: Q -> AppState -> Widget Name
 drawAllInfo q st =
@@ -331,16 +328,16 @@ drawAllInfo q st =
                  hintBox ["Ctrl-a/Esc=close", "↑↓/j/k=scroll"] ]
   where
     subj  = qSubject q
-    label = maybe "?" id (Api.subjChars subj)
+    label = fromMaybe "?" (Api.subjChars subj)
          <> " · " <> subjTypeLabel (Api.subjType subj)
 
     compSection =
-      let comps = Data.Maybe.mapMaybe (\cid -> M.lookup cid (stAllSubjects st))
+      let comps = mapMaybe (\cid -> M.lookup cid (stAllSubjects st))
                                       (Api.subjComponentIds subj)
       in case comps of
            [] -> []
            cs -> str "Components:"
-               : map (\c -> str ("  " <> T.unpack (maybe "?" id (Api.subjChars c))
+               : map (\c -> str ("  " <> T.unpack (fromMaybe "?" (Api.subjChars c))
                               <> "  " <> T.unpack (T.intercalate ", " (Api.subjMeanings c)))) cs
               ++ [str ""]
 
@@ -355,6 +352,41 @@ drawAllInfo q st =
       , withAttr (attrName "hint") (str (title <> ":"))
       , txtWrap (stripWkTags t)
       ]
+
+drawUserInfo :: AppState -> Widget Name
+drawUserInfo st =
+  let u = stUser st
+  in B.borderWithLabel (str "User") $
+       viewport UserViewport Vertical $
+         padAll 1 $
+           vBox
+             [ txt ("Username: " <> Api.userUsername u)
+             , str ("Level:    " <> show (Api.userLevel u))
+             , txt ("Profile:  " <> Api.userProfileUrl u)
+             , padTop (Pad 1) $ hintBox ["Ctrl-u/Esc=close"]
+             ]
+
+drawReviewSchedule :: AppState -> Widget Name
+drawReviewSchedule st =
+  let rows    = Api.reviewsPerHourNext24 (stNow st) (stSummary st)
+      nowAvail = Api.reviewsAvailableNow (stNow st) (stSummary st)
+      fmtHour utc =
+        formatTime defaultTimeLocale "%F %H:00" (utcToLocalTime (stTZ st) utc)
+  in B.borderWithLabel (str "Review Schedule") $
+       viewport ReviewViewport Vertical $
+         padAll 1 $
+           vBox $
+             [ withAttr (attrName "header") $
+                 str ("Available now: " <> show nowAvail)
+             , padTop (Pad 1) $
+                 withAttr (attrName "hint") $ str "Hour (local)            New   Open"
+             ] ++
+             map (\(hStart, newN, openN) ->
+               str ( strPadRight 24 (fmtHour hStart)
+                  <> strPadLeft 3 (show newN) <> "  "
+                  <> strPadLeft 4 (show openN) )
+             ) rows ++
+             [ padTop (Pad 1) $ hintBox ["Ctrl-v/Esc=close", "↑↓/j/k=scroll"] ]
 
 subjTypeLabel :: Api.SubjectType -> Text
 subjTypeLabel Api.Radical        = "Radical"
@@ -377,8 +409,8 @@ stripWkTags t = T.pack (go (T.unpack t))
 handleEvent :: ([Submission] -> IO SubmitResult) -> BrickEvent Name e -> EventM Name AppState ()
 handleEvent submitFn (VtyEvent ev) = do
   st <- get
-  if stShowAllInfo st
-    then handleAllInfo ev
+  if stOverlay st /= NoOverlay
+    then handleOverlay ev
     else case stMode st of
       WrongAnswer _ _ -> handleWrongAnswer ev
       ConfirmSubmit   -> handleConfirm submitFn ev
@@ -386,16 +418,28 @@ handleEvent submitFn (VtyEvent ev) = do
       _               -> handleNormal ev
 handleEvent _ _ = pure ()
 
-handleAllInfo :: V.Event -> EventM Name AppState ()
-handleAllInfo ev =
+handleOverlay :: V.Event -> EventM Name AppState ()
+handleOverlay ev =
   case ev of
-    V.EvKey (V.KChar 'a') [V.MCtrl] -> modify $ \st -> st { stShowAllInfo = False }
-    V.EvKey V.KEsc []                -> modify $ \st -> st { stShowAllInfo = False }
-    V.EvKey V.KUp []                 -> vScrollBy (viewportScroll InfoViewport) (-1)
-    V.EvKey V.KDown []               -> vScrollBy (viewportScroll InfoViewport) 1
-    V.EvKey (V.KChar 'k') []         -> vScrollBy (viewportScroll InfoViewport) (-1)
-    V.EvKey (V.KChar 'j') []         -> vScrollBy (viewportScroll InfoViewport) 1
+    V.EvKey (V.KChar 'a') [V.MCtrl] -> close
+    V.EvKey (V.KChar 'u') [V.MCtrl] -> close
+    V.EvKey (V.KChar 'v') [V.MCtrl] -> close
+    V.EvKey V.KEsc []                -> close
+    V.EvKey V.KUp []                 -> scroll (-1)
+    V.EvKey V.KDown []               -> scroll 1
+    V.EvKey (V.KChar 'k') []         -> scroll (-1)
+    V.EvKey (V.KChar 'j') []         -> scroll 1
     _                                -> pure ()
+  where
+    close = modify $ \st -> st { stOverlay = NoOverlay }
+    scroll n = do
+      st <- get
+      let vp = case stOverlay st of
+                 AllInfo        -> viewportScroll InfoViewport
+                 UserInfo       -> viewportScroll UserViewport
+                 ReviewSchedule -> viewportScroll ReviewViewport
+                 NoOverlay      -> error "scroll called with NoOverlay"
+      vScrollBy vp n
 
 handleWrongAnswer :: V.Event -> EventM Name AppState ()
 handleWrongAnswer ev =
@@ -419,7 +463,11 @@ handleWrongAnswer ev =
         _ -> pure ()
 
     V.EvKey (V.KChar 'a') [V.MCtrl] ->
-      modify $ \st -> st { stShowAllInfo = True }
+      modify $ \st -> st { stOverlay = AllInfo }
+    V.EvKey (V.KChar 'u') [V.MCtrl] ->
+      modify $ \st -> st { stOverlay = UserInfo }
+    V.EvKey (V.KChar 'v') [V.MCtrl] ->
+      modify $ \st -> st { stOverlay = ReviewSchedule }
 
     V.EvKey V.KEnter [] -> do
       st <- get
@@ -440,11 +488,11 @@ handleConfirm submitFn ev =
     V.EvKey V.KEnter []      -> doSubmit
     V.EvKey (V.KChar 'n') [] -> do
       st <- get
-      put st { stMode = Normal }
+      put st { stMode = Finished }
 
     V.EvKey V.KEsc [] -> do
       st <- get
-      put st { stMode = Normal }
+      put st { stMode = Finished }
 
     _ -> pure ()
   where
@@ -463,6 +511,10 @@ handleFinished ev =
   case ev of
     V.EvKey (V.KChar 'q') [V.MCtrl] -> halt
     V.EvKey V.KEsc []               -> halt
+    V.EvKey (V.KChar 'u') [V.MCtrl] ->
+      modify $ \st -> st { stOverlay = UserInfo }
+    V.EvKey (V.KChar 'v') [V.MCtrl] ->
+      modify $ \st -> st { stOverlay = ReviewSchedule }
     V.EvKey (V.KChar 's') [V.MCtrl] -> do
       st <- get
       case stBanner st of
@@ -473,6 +525,10 @@ handleFinished ev =
       if stHasMore st
         then put st { stWantsMore = True } >> halt
         else pure ()
+    V.EvKey V.KUp []         -> vScrollBy (viewportScroll DoneViewport) (-1)
+    V.EvKey V.KDown []       -> vScrollBy (viewportScroll DoneViewport) 1
+    V.EvKey (V.KChar 'k') [] -> vScrollBy (viewportScroll DoneViewport) (-1)
+    V.EvKey (V.KChar 'j') [] -> vScrollBy (viewportScroll DoneViewport) 1
     _                               -> pure ()
 
 handleNormal :: V.Event -> EventM Name AppState ()
@@ -480,10 +536,6 @@ handleNormal ev =
   case ev of
     V.EvKey (V.KChar 'q') [V.MCtrl] ->
       halt
-
-    V.EvKey (V.KChar 's') [V.MCtrl] -> do
-      st <- get
-      put st { stMode = ConfirmSubmit }
 
     V.EvKey (V.KChar 'o') [V.MCtrl] -> do
       st <- get
@@ -504,7 +556,11 @@ handleNormal ev =
         _ -> pure ()
 
     V.EvKey (V.KChar 'a') [V.MCtrl] ->
-      modify $ \st -> st { stShowAllInfo = True }
+      modify $ \st -> st { stOverlay = AllInfo }
+    V.EvKey (V.KChar 'u') [V.MCtrl] ->
+      modify $ \st -> st { stOverlay = UserInfo }
+    V.EvKey (V.KChar 'v') [V.MCtrl] ->
+      modify $ \st -> st { stOverlay = ReviewSchedule }
 
     V.EvKey V.KEsc [] ->
       halt
@@ -514,7 +570,8 @@ handleNormal ev =
       case currentQuestion st of
         Nothing -> pure ()
         Just q  ->
-          put (submitAnswer q (T.strip (stInput st)) st)
+          let ans = T.strip (stInput st)
+          in if T.null ans then pure () else put (submitAnswer q ans st)
 
     V.EvKey V.KBS [] -> do
       st <- get
@@ -719,7 +776,7 @@ displayItem s =
           Api.KanaVocabulary -> " (Vocab)"
       core =
         case Api.subjChars s of
-          Just c | not (T.null (T.strip c)) -> T.unpack (T.strip c)
+          Just c | let cs = T.strip c, not (T.null cs) -> T.unpack cs
           _ ->
             let m = case Api.subjMeanings s of
                       (x:_) -> T.unpack x
@@ -737,7 +794,7 @@ displayInput QMeaning t = t
 
 hasAudio :: Q -> AppState -> Bool
 hasAudio q st =
-  not (null (Api.subjAudioUrls (qSubject q))) && stAudioPlayer st /= Nothing
+  not (null (Api.subjAudioUrls (qSubject q))) && isJust (stAudioPlayer st)
 
 -- | Render a list of hint strings as auto-wrapping text.
 hintBox :: [Text] -> Widget Name
@@ -747,10 +804,17 @@ hintBox hints =
 
 normalHintWidget :: Q -> AppState -> Widget Name
 normalHintWidget q st =
-  hintBox $
-    [ "Enter=submit", "Ctrl-o=override", "Ctrl-r=requeue"
-    , "Ctrl-a=all info", "Esc=quit", "Ctrl-s=submit batch"
-    ] ++ [ "Ctrl-p=play audio" | hasAudio q st ]
+  case stMode st of
+    WrongAnswer _ _ ->
+      hintBox $
+        [ "Ctrl-o=override correct", "Ctrl-r=requeue (no penalty)", "Enter=requeue (wrong)"
+        , "Ctrl-a=all info", "Ctrl-u=user", "Ctrl-v=reviews"
+        ] ++ [ "Ctrl-p=play audio" | hasAudio q st ]
+    _ ->
+      hintBox $
+        [ "Enter=submit", "Ctrl-o=override", "Ctrl-r=requeue"
+        , "Ctrl-a=all info", "Ctrl-u=user", "Ctrl-v=reviews", "Esc=quit"
+        ] ++ [ "Ctrl-p=play audio" | hasAudio q st ]
 
 -- | Fire-and-forget audio playback via configured external player.
 playAudio :: Maybe String -> Api.Subject -> IO ()
@@ -760,10 +824,10 @@ playAudio (Just cmd) subj =
     [] -> pure ()
     urls -> do
       i <- randomRIO (0, length urls - 1)
-      let url   = urls !! i
-          parts = case words cmd of { [] -> ["mpv"]; ws -> ws }
-          exe   = head parts
-          args  = tail parts
+      let url         = urls !! i
+          (exe, args) = case words cmd of
+                          []     -> ("mpv", [])
+                          (w:ws) -> (w, ws)
       void $ spawnProcess exe (args ++ [T.unpack url])
 
 normMeaning :: Text -> Text
@@ -807,7 +871,8 @@ britishToAmerican = T.unwords . map convertWord . T.words
       | "isation" `T.isSuffixOf` w                  = T.dropEnd 7 w <> "ization"
       | "ise"     `T.isSuffixOf` w
       , w `notElem` iseBlacklist                     = T.dropEnd 3 w <> "ize"
-      | "ogue"    `T.isSuffixOf` w                  = T.dropEnd 4 w <> "og"
+      | "ogue"    `T.isSuffixOf` w
+      , w `notElem` ogueBlacklist                    = T.dropEnd 4 w <> "og"
       | otherwise                                    = w
 
     ourBlacklist =
@@ -820,7 +885,11 @@ britishToAmerican = T.unwords . map convertWord . T.words
       , "supervise", "advertise", "comprise", "disguise", "arise"
       , "otherwise", "likewise", "clockwise", "lengthwise"
       , "prise", "demise", "surmise", "premise", "treatise"
-      , "precise", "concise" ]
+      , "precise", "concise"
+      , "noise", "poise", "turquoise", "tortoise", "porpoise" ]
+
+    ogueBlacklist =
+      [ "rogue", "vogue", "pirogue", "brogue" ]
 
 normReading :: Text -> Text
 normReading t =
