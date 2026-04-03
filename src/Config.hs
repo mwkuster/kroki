@@ -90,7 +90,7 @@ initConfig = do
 writeConfigInteractive :: FilePath -> FilePath -> KrokiConfig -> IO ()
 writeConfigInteractive dir path existing = do
   token      <- prompt "WaniKani API token (required)" Nothing
-  batchSize  <- prompt "Batch size" (Just (maybe (show defaultBatchSize)  show (cfgBatchSize existing)))
+  batchSize  <- prompt "Batch size (0 = all available)" (Just (maybe (show defaultBatchSize)  show (cfgBatchSize existing)))
   requeueAft <- prompt "Requeue after (positions)" (Just (maybe (show defaultRequeueAfter) show (cfgRequeueAfter existing)))
   audioPlay  <- prompt "Audio player command (leave empty to disable)" (cfgAudioPlayer existing)
 

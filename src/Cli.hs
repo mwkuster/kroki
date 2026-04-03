@@ -53,7 +53,7 @@ batchSizeOption =
   option auto
     ( long "batch-size"
    <> metavar "N"
-   <> help "Max reviews to include in a study batch (overrides config batch_size)" )
+   <> help "Max reviews per batch (0 = all available; overrides config batch_size)" )
 
 requeueAfterOption :: Parser Int
 requeueAfterOption =

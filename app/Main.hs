@@ -78,7 +78,8 @@ main = do
           rqAfter =
             fromMaybe Config.defaultRequeueAfter
               (Cli.studyRequeueAfter studyOpts <|> Config.cfgRequeueAfter cfg)
-          n = fromMaybe 10 batchSize
+          raw = fromMaybe 10 batchSize
+          n   = if raw == 0 then maxBound else raw
       now  <- getCurrentTime
       tz   <- getCurrentTimeZone
       user <- Api.getUser t
