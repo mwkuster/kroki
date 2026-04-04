@@ -176,12 +176,12 @@ app submitFn = App
 
 theMap :: AttrMap
 theMap = attrMap V.defAttr
-  [ (L.listAttr,         V.white `on` V.black)
-  , (L.listSelectedAttr, V.black `on` V.yellow)
+  [ (L.listAttr,         V.defAttr)
+  , (L.listSelectedAttr, V.defAttr `V.withStyle` V.reverseVideo)
   , (attrName "header",  fg V.cyan)
   , (attrName "ok",      fg V.green)
   , (attrName "bad",     fg V.red)
-  , (attrName "hint",    fg V.white)
+  , (attrName "hint",    V.defAttr `V.withStyle` V.dim)
   ]
 
 --------------------------------------------------------------------------------
