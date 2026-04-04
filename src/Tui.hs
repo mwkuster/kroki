@@ -192,7 +192,7 @@ drawUi :: AppState -> [Widget Name]
 drawUi st =
   [ C.center $
       hBox
-        [ hLimit 36 $ drawQueue st
+        [ hLimit 28 $ drawQueue st
         , B.vBorder
         , padLeft (Pad 1) $ hLimit 80 $ drawMain st
         ]
