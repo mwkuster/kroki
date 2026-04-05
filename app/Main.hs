@@ -103,7 +103,11 @@ main = do
                       , Just asgId <- [M.lookup (Api.subjId subj) subjToAsg]
                       ]
                 let audioPlayer = Config.cfgAudioPlayer cfg
-                wantsMore <- Tui.runStudyTui rqAfter audioPlayer user summary now tz allSubjMap subjToAsg subjects (submitBatch asgToSubj)
+                let refreshSummary = do
+                      now' <- getCurrentTime
+                      summary' <- Api.getSummary t
+                      pure (now', summary')
+                wantsMore <- Tui.runStudyTui rqAfter audioPlayer user summary now tz allSubjMap subjToAsg subjects refreshSummary (submitBatch asgToSubj)
                 if wantsMore then runBatch else pure ()
 
           submitBatch asgToSubj subs = do

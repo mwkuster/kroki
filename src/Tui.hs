@@ -125,8 +125,8 @@ data AppState = AppState
 -- Entry point
 --------------------------------------------------------------------------------
 
-runStudyTui :: Int -> Maybe String -> Api.User -> Api.Summary -> UTCTime -> TimeZone -> M.Map Int Api.Subject -> M.Map Int Int -> [Api.Subject] -> ([Submission] -> IO SubmitResult) -> IO Bool
-runStudyTui rqAfter audioPlayer user summary now tz allSubjects subjToAsg subjects submitFn = do
+runStudyTui :: Int -> Maybe String -> Api.User -> Api.Summary -> UTCTime -> TimeZone -> M.Map Int Api.Subject -> M.Map Int Int -> [Api.Subject] -> IO (UTCTime, Api.Summary) -> ([Submission] -> IO SubmitResult) -> IO Bool
+runStudyTui rqAfter audioPlayer user summary now tz allSubjects subjToAsg subjects refreshFn submitFn = do
   let queue0 = concatMap mkQuestions subjects
       prog0  = M.fromList [ (Api.subjId s, initProgress s) | s <- subjects ]
 
@@ -158,18 +158,18 @@ runStudyTui rqAfter audioPlayer user summary now tz allSubjects subjToAsg subjec
 
   let buildVty = VCP.mkVty V.defaultConfig
   initialVty <- buildVty
-  finalState <- customMain initialVty buildVty Nothing (app submitFn) st0
+  finalState <- customMain initialVty buildVty Nothing (app refreshFn submitFn) st0
   pure (stWantsMore finalState)
 
 --------------------------------------------------------------------------------
 -- App
 --------------------------------------------------------------------------------
 
-app :: ([Submission] -> IO SubmitResult) -> App AppState e Name
-app submitFn = App
+app :: IO (UTCTime, Api.Summary) -> ([Submission] -> IO SubmitResult) -> App AppState e Name
+app refreshFn submitFn = App
   { appDraw         = drawUi
   , appChooseCursor = neverShowCursor
-  , appHandleEvent  = handleEvent submitFn
+  , appHandleEvent  = handleEvent refreshFn submitFn
   , appStartEvent   = pure ()
   , appAttrMap      = const theMap
   }
@@ -406,17 +406,17 @@ stripWkTags t = T.pack (go (T.unpack t))
 -- Event handling
 --------------------------------------------------------------------------------
 
-handleEvent :: ([Submission] -> IO SubmitResult) -> BrickEvent Name e -> EventM Name AppState ()
-handleEvent submitFn (VtyEvent ev) = do
+handleEvent :: IO (UTCTime, Api.Summary) -> ([Submission] -> IO SubmitResult) -> BrickEvent Name e -> EventM Name AppState ()
+handleEvent refreshFn submitFn (VtyEvent ev) = do
   st <- get
   if stOverlay st /= NoOverlay
     then handleOverlay ev
     else case stMode st of
-      WrongAnswer _ _ -> handleWrongAnswer ev
+      WrongAnswer _ _ -> handleWrongAnswer refreshFn ev
       ConfirmSubmit   -> handleConfirm submitFn ev
-      Finished        -> handleFinished ev
-      _               -> handleNormal ev
-handleEvent _ _ = pure ()
+      Finished        -> handleFinished refreshFn ev
+      _               -> handleNormal refreshFn ev
+handleEvent _ _ _ = pure ()
 
 handleOverlay :: V.Event -> EventM Name AppState ()
 handleOverlay ev =
@@ -441,8 +441,8 @@ handleOverlay ev =
                  NoOverlay      -> error "scroll called with NoOverlay"
       vScrollBy vp n
 
-handleWrongAnswer :: V.Event -> EventM Name AppState ()
-handleWrongAnswer ev =
+handleWrongAnswer :: IO (UTCTime, Api.Summary) -> V.Event -> EventM Name AppState ()
+handleWrongAnswer refreshFn ev =
   case ev of
     V.EvKey (V.KChar 'o') [V.MCtrl] -> do
       st <- get
@@ -466,8 +466,9 @@ handleWrongAnswer ev =
       modify $ \st -> st { stOverlay = AllInfo }
     V.EvKey (V.KChar 'u') [V.MCtrl] ->
       modify $ \st -> st { stOverlay = UserInfo }
-    V.EvKey (V.KChar 'v') [V.MCtrl] ->
-      modify $ \st -> st { stOverlay = ReviewSchedule }
+    V.EvKey (V.KChar 'v') [V.MCtrl] -> do
+      (now', summary') <- liftIO refreshFn
+      modify $ \st -> st { stOverlay = ReviewSchedule, stNow = now', stSummary = summary' }
 
     V.EvKey V.KEnter [] -> do
       st <- get
@@ -506,15 +507,16 @@ handleConfirm submitFn ev =
         , stSubmitDetails = srDetails result
         }
 
-handleFinished :: V.Event -> EventM Name AppState ()
-handleFinished ev =
+handleFinished :: IO (UTCTime, Api.Summary) -> V.Event -> EventM Name AppState ()
+handleFinished refreshFn ev =
   case ev of
     V.EvKey (V.KChar 'q') [V.MCtrl] -> halt
     V.EvKey V.KEsc []               -> halt
     V.EvKey (V.KChar 'u') [V.MCtrl] ->
       modify $ \st -> st { stOverlay = UserInfo }
-    V.EvKey (V.KChar 'v') [V.MCtrl] ->
-      modify $ \st -> st { stOverlay = ReviewSchedule }
+    V.EvKey (V.KChar 'v') [V.MCtrl] -> do
+      (now', summary') <- liftIO refreshFn
+      modify $ \st -> st { stOverlay = ReviewSchedule, stNow = now', stSummary = summary' }
     V.EvKey (V.KChar 's') [V.MCtrl] -> do
       st <- get
       case stBanner st of
@@ -531,8 +533,8 @@ handleFinished ev =
     V.EvKey (V.KChar 'j') [] -> vScrollBy (viewportScroll DoneViewport) 1
     _                               -> pure ()
 
-handleNormal :: V.Event -> EventM Name AppState ()
-handleNormal ev =
+handleNormal :: IO (UTCTime, Api.Summary) -> V.Event -> EventM Name AppState ()
+handleNormal refreshFn ev =
   case ev of
     V.EvKey (V.KChar 'q') [V.MCtrl] ->
       halt
@@ -559,8 +561,9 @@ handleNormal ev =
       modify $ \st -> st { stOverlay = AllInfo }
     V.EvKey (V.KChar 'u') [V.MCtrl] ->
       modify $ \st -> st { stOverlay = UserInfo }
-    V.EvKey (V.KChar 'v') [V.MCtrl] ->
-      modify $ \st -> st { stOverlay = ReviewSchedule }
+    V.EvKey (V.KChar 'v') [V.MCtrl] -> do
+      (now', summary') <- liftIO refreshFn
+      modify $ \st -> st { stOverlay = ReviewSchedule, stNow = now', stSummary = summary' }
 
     V.EvKey V.KEsc [] ->
       halt
