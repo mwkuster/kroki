@@ -20,6 +20,7 @@ module Tui
   , initProgress
   , markOk
   , incWrong
+  , britishToAmerican
   ) where
 
 import qualified Api

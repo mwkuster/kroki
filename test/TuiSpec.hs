@@ -103,6 +103,7 @@ spec = do
     describe "british spellings" $ do
       it "colour → color"           $ Tui.normMeaning "colour"       `shouldBe` "color"
       it "honour → honor"           $ Tui.normMeaning "honour"       `shouldBe` "honor"
+      it "honourable → honorable"   $ Tui.normMeaning "honourable"   `shouldBe` "honorable"
       it "behaviour → behavior"     $ Tui.normMeaning "behaviour"    `shouldBe` "behavior"
       it "centre → center"          $ Tui.normMeaning "centre"       `shouldBe` "center"
       it "theatre → theater"        $ Tui.normMeaning "theatre"      `shouldBe` "theater"
