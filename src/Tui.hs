@@ -264,7 +264,7 @@ drawMain st
                  )
 
     Just q ->
-      B.borderWithLabel (str "Current") $
+      B.borderWithLabel (str ("Current" <> srsIndicator q st)) $
         padAll 1 $
           vBox
             [ withAttr (attrName "header") $
@@ -816,6 +816,12 @@ hintBox :: [Text] -> Widget Name
 hintBox hints =
   withAttr (attrName "hint") $
     txtWrap (T.intercalate "  " hints)
+
+srsIndicator :: Q -> AppState -> String
+srsIndicator q st =
+  case M.lookup (Api.subjId (qSubject q)) (stSubjToAsg st) of
+    Just asg -> " · " <> Api.srsStageLabel (Api.asSrsStage asg)
+    Nothing  -> ""
 
 normalHintWidget :: Q -> AppState -> Widget Name
 normalHintWidget q st =
