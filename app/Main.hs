@@ -97,8 +97,8 @@ main = do
                 let compIds = nub [ cid | s <- subjects, cid <- Api.subjComponentIds s ]
                 compSubjects <- Api.getSubjectsByIds t compIds
                 let allSubjMap = M.fromList [ (Api.subjId s, s) | s <- subjects ++ compSubjects ]
-                    asgToSubj  = M.fromList
-                      [ (Api.asId asg, subj)
+                    asgToInfo  = M.fromList
+                      [ (Api.asId asg, (subj, asg))
                       | subj <- subjects
                       , Just asg <- [M.lookup (Api.subjId subj) subjToAsg]
                       ]
@@ -107,11 +107,11 @@ main = do
                       now' <- getCurrentTime
                       summary' <- Api.getSummary t
                       pure (now', summary')
-                wantsMore <- Tui.runStudyTui rqAfter audioPlayer user summary now tz allSubjMap subjToAsg subjects refreshSummary (submitBatch asgToSubj)
+                wantsMore <- Tui.runStudyTui rqAfter audioPlayer user summary now tz allSubjMap subjToAsg subjects refreshSummary (submitBatch asgToInfo)
                 if wantsMore then runBatch else pure ()
 
-          submitBatch asgToSubj subs = do
-            let details = map (fmtSub asgToSubj) subs
+          submitBatch asgToInfo subs = do
+            let details = map (fmtSub asgToInfo) subs
             ts <- getCurrentTime
             mapM_
               (\s ->
@@ -134,18 +134,22 @@ main = do
 
       runBatch
 
-fmtSub :: M.Map Int Api.Subject -> Tui.Submission -> String
-fmtSub asgToSubj s =
-  let name = case M.lookup (Tui.subAssignmentId s) asgToSubj of
-               Just subj -> subjLabel subj
-               Nothing   -> "assignment #" <> show (Tui.subAssignmentId s)
-      correct = Tui.subWrongMeaning s == 0 && Tui.subWrongReading s == 0
+fmtSub :: M.Map Int (Api.Subject, Api.Assignment) -> Tui.Submission -> String
+fmtSub asgToInfo s =
+  let wrongTotal = Tui.subWrongMeaning s + Tui.subWrongReading s
+      (name, stageSuffix) =
+        case M.lookup (Tui.subAssignmentId s) asgToInfo of
+          Just (subj, asg) ->
+            let future = Api.srsStageLabel (Api.nextSrsStage asg wrongTotal)
+            in (subjLabel subj, " → " <> future)
+          Nothing ->
+            ("assignment #" <> show (Tui.subAssignmentId s), "")
       status
-        | correct   = "correct"
-        | otherwise = "incorrect"
-                   <> " (meaning wrong: " <> show (Tui.subWrongMeaning s)
-                   <> ", reading wrong: " <> show (Tui.subWrongReading s) <> ")"
-  in strPadRight 30 name <> "  " <> status
+        | wrongTotal == 0 = "correct"
+        | otherwise       = "incorrect"
+                         <> " (m:" <> show (Tui.subWrongMeaning s)
+                         <> " r:" <> show (Tui.subWrongReading s) <> ")"
+  in name <> "  " <> status <> stageSuffix
 
 subjLabel :: Api.Subject -> String
 subjLabel subj =

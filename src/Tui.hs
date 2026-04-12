@@ -236,7 +236,7 @@ drawMain st
                   case stSubmitDetails st of
                     [] -> []
                     ds -> padTop (Pad 1) (withAttr (attrName "hint") (str "--- submitted ---"))
-                        : map (withAttr (attrName "hint") . str) ds
+                        : map (withAttr (attrName "hint") . txtWrap . T.pack) ds
                 bannerWidgets =
                   case stBanner st of
                     Just msg -> [padTop (Pad 1) (txt msg)]

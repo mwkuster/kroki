@@ -15,6 +15,7 @@ module Api
   , SrsStage(..)
   , srsStageLabel
   , Assignment(..)
+  , nextSrsStage
   , getAvailableAssignments
 
   , SubjectType(..)
@@ -201,11 +202,23 @@ srsStageFromInt 8         = Enlightened
 srsStageFromInt _         = Burned
 
 data Assignment = Assignment
-  { asId        :: Int
-  , asSubjectId :: Int
-  , asLevel     :: Int
-  , asSrsStage  :: SrsStage
+  { asId           :: Int
+  , asSubjectId    :: Int
+  , asLevel        :: Int
+  , asSrsStage     :: SrsStage
+  , asSrsStageNum  :: Int
   } deriving (Show, Eq)
+
+-- | Compute the SRS stage category after a review.
+-- wrongTotal is the sum of wrong meaning and wrong reading counts.
+-- Correct (wrongTotal == 0): advance by 1. Incorrect: penalise by
+-- ceil(wrongTotal / 2), minimum 1 stage drop, floor at Apprentice I (1).
+nextSrsStage :: Assignment -> Int -> SrsStage
+nextSrsStage asg wrongTotal =
+  let cur = asSrsStageNum asg
+      next | wrongTotal == 0 = min 9 (cur + 1)
+           | otherwise       = max 1 (cur - max 1 ((wrongTotal + 1) `div` 2))
+  in srsStageFromInt next
 
 newtype AssignmentsEnvelope = AssignmentsEnvelope { aeData :: [AssignmentData] } deriving (Show)
 
@@ -231,7 +244,7 @@ instance FromJSON AssignmentData where
 
 toAssignment :: AssignmentData -> Assignment
 toAssignment (AssignmentData i s lvl stage) =
-  Assignment i s lvl (srsStageFromInt stage)
+  Assignment i s lvl (srsStageFromInt stage) stage
 
 getAvailableAssignments :: String -> UTCTime -> Int -> IO [Assignment]
 getAvailableAssignments token now n = runReq defaultHttpConfig $ do
