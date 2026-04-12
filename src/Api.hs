@@ -12,7 +12,10 @@ module Api
   , nextReviewBucket
   , reviewsPerHourNext24
 
+  , SrsStage(..)
+  , srsStageLabel
   , Assignment(..)
+  , nextSrsStage
   , getAvailableAssignments
 
   , SubjectType(..)
@@ -179,16 +182,49 @@ reviewsPerHourNext24 now s =
 -- Assignments (to get what's available now)
 --------------------------------------------------------------------------------
 
+data SrsStage = Initiate | Apprentice | Guru | Master | Enlightened | Burned
+  deriving (Show, Eq)
+
+srsStageLabel :: SrsStage -> String
+srsStageLabel Initiate   = "Initiate"
+srsStageLabel Apprentice = "Apprentice"
+srsStageLabel Guru       = "Guru"
+srsStageLabel Master     = "Master"
+srsStageLabel Enlightened = "Enlightened"
+srsStageLabel Burned     = "Burned"
+
+srsStageFromInt :: Int -> SrsStage
+srsStageFromInt 0         = Initiate
+srsStageFromInt n | n <= 4 = Apprentice
+srsStageFromInt n | n <= 6 = Guru
+srsStageFromInt 7         = Master
+srsStageFromInt 8         = Enlightened
+srsStageFromInt _         = Burned
+
 data Assignment = Assignment
-  { asId        :: Int
-  , asSubjectId :: Int
+  { asId           :: Int
+  , asSubjectId    :: Int
+  , asSrsStage     :: SrsStage
+  , asSrsStageNum  :: Int
   } deriving (Show, Eq)
+
+-- | Compute the SRS stage category after a review.
+-- wrongTotal is the sum of wrong meaning and wrong reading counts.
+-- Correct (wrongTotal == 0): advance by 1. Incorrect: penalise by
+-- ceil(wrongTotal / 2), minimum 1 stage drop, floor at Apprentice I (1).
+nextSrsStage :: Assignment -> Int -> SrsStage
+nextSrsStage asg wrongTotal =
+  let cur = asSrsStageNum asg
+      next | wrongTotal == 0 = min 9 (cur + 1)
+           | otherwise       = max 1 (cur - max 1 ((wrongTotal + 1) `div` 2))
+  in srsStageFromInt next
 
 newtype AssignmentsEnvelope = AssignmentsEnvelope { aeData :: [AssignmentData] } deriving (Show)
 
 data AssignmentData = AssignmentData
-  { adId      :: Int
-  , adSubject :: Int
+  { adId        :: Int
+  , adSubject   :: Int
+  , adSrsStage  :: Int
   } deriving (Show)
 
 instance FromJSON AssignmentsEnvelope where
@@ -197,13 +233,15 @@ instance FromJSON AssignmentsEnvelope where
 
 instance FromJSON AssignmentData where
   parseJSON = withObject "AssignmentData" $ \o -> do
-    i <- o .: "id"
-    d <- o .: "data"
-    s <- d .: "subject_id"
-    pure (AssignmentData i s)
+    i     <- o .: "id"
+    d     <- o .: "data"
+    s     <- d .: "subject_id"
+    stage <- d .: "srs_stage"
+    pure (AssignmentData i s stage)
 
 toAssignment :: AssignmentData -> Assignment
-toAssignment (AssignmentData i s) = Assignment i s
+toAssignment (AssignmentData i s stage) =
+  Assignment i s (srsStageFromInt stage) stage
 
 getAvailableAssignments :: String -> UTCTime -> Int -> IO [Assignment]
 getAvailableAssignments token now n = runReq defaultHttpConfig $ do
@@ -233,6 +271,7 @@ data SubjectType = Radical | Kanji | Vocabulary | KanaVocabulary
 data Subject = Subject
   { subjId               :: Int
   , subjType             :: SubjectType
+  , subjLevel            :: Int
   , subjChars            :: Maybe Text
   , subjMeanings         :: [Text]       -- accepted meanings
   , subjReadings         :: [Text]       -- accepted readings (kana/romaji depending on type)
@@ -260,6 +299,7 @@ instance FromJSON Subject where
     st  <- parseSubjectType obj
     d   <- o .: "data"
 
+    lvl   <- d .:  "level"
     chars <- d .:? "characters"
 
     meanings <- d .: "meanings" >>= parseAccepted "meaning"
@@ -284,6 +324,7 @@ instance FromJSON Subject where
     pure Subject
       { subjId              = sid
       , subjType            = st
+      , subjLevel           = lvl
       , subjChars           = chars
       , subjMeanings        = meanings
       , subjReadings        = readings

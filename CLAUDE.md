@@ -45,7 +45,7 @@ This is a WaniKani (kanji/vocabulary SRS) CLI+TUI app. The study flow:
 - `Enter` — submit answer
 - `Ctrl-o` — override as correct
 - `Ctrl-r` — requeue question later (no penalty)
-- `Ctrl-a` — show all info overlay (components, meanings, readings, mnemonics); ↑↓/j/k to scroll, Ctrl-a/Esc to close
+- `Ctrl-a` — show all info overlay (level, SRS stage, components, meanings, readings, mnemonics); ↑↓/j/k to scroll, Ctrl-a/Esc to close
 - `Ctrl-u` — show user info overlay (username, level, profile URL)
 - `Ctrl-v` — show review schedule overlay (next 24h); ↑↓/j/k to scroll, Ctrl-v/Esc to close
 - `Ctrl-p` — play pronunciation audio (vocabulary, requires `audio_player` in config)
@@ -63,6 +63,12 @@ data Progress = Progress
 -- What gets submitted back to WaniKani
 data Submission = Submission
   { subAssignmentId :: Int, subWrongMeaning :: Int, subWrongReading :: Int }
+
+-- SRS stage category (Initiate/Apprentice/Guru/Master/Enlightened/Burned)
+-- Assignment carries both the enum and the raw integer stage (asSrsStageNum)
+-- for penalty calculations. Subject carries the WaniKani level (subjLevel).
 ```
 
 Answer normalization: meanings use case-folding + space-collapsing; readings use romaji→hiragana conversion via `Romaji.hs`.
+
+The current SRS stage is shown in the question border (`Current · Apprentice`). After submission, each line in the results list shows the resulting stage (`→ Guru`).

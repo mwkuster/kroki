@@ -103,7 +103,7 @@ data AppState = AppState
   , stQueueWidget  :: L.List Name Q
   , stInput        :: Text
   , stProgress     :: M.Map Int Progress
-  , stSubjToAsg    :: M.Map Int Int
+  , stSubjToAsg    :: M.Map Int Api.Assignment
   , stRequeueAfter :: Int
   , stCorrect      :: Int
   , stWrong        :: Int
@@ -126,7 +126,7 @@ data AppState = AppState
 -- Entry point
 --------------------------------------------------------------------------------
 
-runStudyTui :: Int -> Maybe String -> Api.User -> Api.Summary -> UTCTime -> TimeZone -> M.Map Int Api.Subject -> M.Map Int Int -> [Api.Subject] -> IO (UTCTime, Api.Summary) -> ([Submission] -> IO SubmitResult) -> IO Bool
+runStudyTui :: Int -> Maybe String -> Api.User -> Api.Summary -> UTCTime -> TimeZone -> M.Map Int Api.Subject -> M.Map Int Api.Assignment -> [Api.Subject] -> IO (UTCTime, Api.Summary) -> ([Submission] -> IO SubmitResult) -> IO Bool
 runStudyTui rqAfter audioPlayer user summary now tz allSubjects subjToAsg subjects refreshFn submitFn = do
   let queue0 = concatMap mkQuestions subjects
       prog0  = M.fromList [ (Api.subjId s, initProgress s) | s <- subjects ]
@@ -236,7 +236,7 @@ drawMain st
                   case stSubmitDetails st of
                     [] -> []
                     ds -> padTop (Pad 1) (withAttr (attrName "hint") (str "--- submitted ---"))
-                        : map (withAttr (attrName "hint") . str) ds
+                        : map (withAttr (attrName "hint") . txtWrap . T.pack) ds
                 bannerWidgets =
                   case stBanner st of
                     Just msg -> [padTop (Pad 1) (txt msg)]
@@ -264,7 +264,7 @@ drawMain st
                  )
 
     Just q ->
-      B.borderWithLabel (str "Current") $
+      B.borderWithLabel (str ("Current" <> srsIndicator q st)) $
         padAll 1 $
           vBox
             [ withAttr (attrName "header") $
@@ -320,7 +320,8 @@ drawAllInfo q st =
     viewport InfoViewport Vertical $
       padAll 1 $
         vBox $
-             compSection
+             assignSection
+          ++ compSection
           ++ [ str ("Meanings:  " <> T.unpack (T.intercalate ", " (Api.subjMeanings subj))) ]
           ++ readSection
           ++ mnSection "Meaning mnemonic" (Api.subjMeaningMnemonic subj)
@@ -331,6 +332,15 @@ drawAllInfo q st =
     subj  = qSubject q
     label = fromMaybe "?" (Api.subjChars subj)
          <> " · " <> subjTypeLabel (Api.subjType subj)
+
+    assignSection =
+      let stageStr = case M.lookup (Api.subjId subj) (stSubjToAsg st) of
+                       Just asg -> Api.srsStageLabel (Api.asSrsStage asg)
+                       Nothing  -> "?"
+      in [ str ("Level:     " <> show (Api.subjLevel subj))
+         , str ("SRS stage: " <> stageStr)
+         , str ""
+         ]
 
     compSection =
       let comps = mapMaybe (\cid -> M.lookup cid (stAllSubjects st))
@@ -713,7 +723,8 @@ mkSubmissions st =
       , subWrongReading = pReadingWrong p
       }
   | (sid, p) <- M.toList (stProgress st)
-  , Just asgId <- [M.lookup sid (stSubjToAsg st)]
+  , Just asg <- [M.lookup sid (stSubjToAsg st)]
+  , let asgId = Api.asId asg
   ]
 
 --------------------------------------------------------------------------------
@@ -805,6 +816,12 @@ hintBox :: [Text] -> Widget Name
 hintBox hints =
   withAttr (attrName "hint") $
     txtWrap (T.intercalate "  " hints)
+
+srsIndicator :: Q -> AppState -> String
+srsIndicator q st =
+  case M.lookup (Api.subjId (qSubject q)) (stSubjToAsg st) of
+    Just asg -> " · " <> Api.srsStageLabel (Api.asSrsStage asg)
+    Nothing  -> ""
 
 normalHintWidget :: Q -> AppState -> Widget Name
 normalHintWidget q st =

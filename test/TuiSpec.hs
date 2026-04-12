@@ -21,6 +21,7 @@ kanjiSubj :: Api.Subject
 kanjiSubj = Api.Subject
   { Api.subjId              = 1
   , Api.subjType            = Api.Kanji
+  , Api.subjLevel           = 1
   , Api.subjChars           = Just "日"
   , Api.subjMeanings        = ["Sun", "Day"]
   , Api.subjReadings        = ["にち", "じつ"]
@@ -35,6 +36,7 @@ radicalSubj :: Api.Subject
 radicalSubj = Api.Subject
   { Api.subjId              = 2
   , Api.subjType            = Api.Radical
+  , Api.subjLevel           = 1
   , Api.subjChars           = Just "一"
   , Api.subjMeanings        = ["One"]
   , Api.subjReadings        = []
@@ -49,6 +51,7 @@ vocabSubj :: Api.Subject
 vocabSubj = Api.Subject
   { Api.subjId              = 3
   , Api.subjType            = Api.Vocabulary
+  , Api.subjLevel           = 3
   , Api.subjChars           = Just "学校"
   , Api.subjMeanings        = ["School"]
   , Api.subjReadings        = ["がっこう"]
@@ -62,7 +65,7 @@ mkQ :: Api.Subject -> Tui.QKind -> Tui.Q
 mkQ s k = Tui.Q { Tui.qSubject = s, Tui.qKind = k }
 
 -- Bare AppState with only progress/subjToAsg populated (for mkSubmissions)
-stateWith :: M.Map Int Tui.Progress -> M.Map Int Int -> Tui.AppState
+stateWith :: M.Map Int Tui.Progress -> M.Map Int Api.Assignment -> Tui.AppState
 stateWith prog subjToAsg = Tui.AppState
   { Tui.stQueue        = []
   , Tui.stQueueWidget  = L.list Tui.QueueList (Vec.fromList []) 1
@@ -286,7 +289,8 @@ spec = do
       Tui.pMeaningWrong result `shouldBe` 2
 
   describe "mkSubmissions" $ do
-    let subjToAsg = M.fromList [(1, 101), (3, 303)]
+    let mkAsg sid asgId = Api.Assignment { Api.asId = asgId, Api.asSubjectId = sid, Api.asSrsStage = Api.Apprentice, Api.asSrsStageNum = 3 }
+        subjToAsg = M.fromList [(1, mkAsg 1 101), (3, mkAsg 3 303)]
 
     it "produces one submission per subject with an assignment" $ do
       let prog = M.fromList
