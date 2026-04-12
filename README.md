@@ -33,7 +33,7 @@ A minimal terminal client for [WaniKani](https://www.wanikani.com/) — do your 
 Requires GHC and Cabal (tested with GHC 9.6, Cabal 3.x).
 
 ```bash
-git clone https://github.com/yourname/kroki
+git clone https://github.com/mwkuster/kroki
 cd kroki
 cabal build
 cabal install
