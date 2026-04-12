@@ -204,7 +204,6 @@ srsStageFromInt _         = Burned
 data Assignment = Assignment
   { asId           :: Int
   , asSubjectId    :: Int
-  , asLevel        :: Int
   , asSrsStage     :: SrsStage
   , asSrsStageNum  :: Int
   } deriving (Show, Eq)
@@ -225,7 +224,6 @@ newtype AssignmentsEnvelope = AssignmentsEnvelope { aeData :: [AssignmentData] }
 data AssignmentData = AssignmentData
   { adId        :: Int
   , adSubject   :: Int
-  , adLevel     :: Int
   , adSrsStage  :: Int
   } deriving (Show)
 
@@ -238,13 +236,12 @@ instance FromJSON AssignmentData where
     i     <- o .: "id"
     d     <- o .: "data"
     s     <- d .: "subject_id"
-    lvl   <- d .: "level"
     stage <- d .: "srs_stage"
-    pure (AssignmentData i s lvl stage)
+    pure (AssignmentData i s stage)
 
 toAssignment :: AssignmentData -> Assignment
-toAssignment (AssignmentData i s lvl stage) =
-  Assignment i s lvl (srsStageFromInt stage) stage
+toAssignment (AssignmentData i s stage) =
+  Assignment i s (srsStageFromInt stage) stage
 
 getAvailableAssignments :: String -> UTCTime -> Int -> IO [Assignment]
 getAvailableAssignments token now n = runReq defaultHttpConfig $ do
@@ -274,6 +271,7 @@ data SubjectType = Radical | Kanji | Vocabulary | KanaVocabulary
 data Subject = Subject
   { subjId               :: Int
   , subjType             :: SubjectType
+  , subjLevel            :: Int
   , subjChars            :: Maybe Text
   , subjMeanings         :: [Text]       -- accepted meanings
   , subjReadings         :: [Text]       -- accepted readings (kana/romaji depending on type)
@@ -301,6 +299,7 @@ instance FromJSON Subject where
     st  <- parseSubjectType obj
     d   <- o .: "data"
 
+    lvl   <- d .:  "level"
     chars <- d .:? "characters"
 
     meanings <- d .: "meanings" >>= parseAccepted "meaning"
@@ -325,6 +324,7 @@ instance FromJSON Subject where
     pure Subject
       { subjId              = sid
       , subjType            = st
+      , subjLevel           = lvl
       , subjChars           = chars
       , subjMeanings        = meanings
       , subjReadings        = readings

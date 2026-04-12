@@ -334,13 +334,13 @@ drawAllInfo q st =
          <> " · " <> subjTypeLabel (Api.subjType subj)
 
     assignSection =
-      case M.lookup (Api.subjId subj) (stSubjToAsg st) of
-        Nothing  -> []
-        Just asg ->
-          [ str ("Level:     " <> show (Api.asLevel asg))
-          , str ("SRS stage: " <> Api.srsStageLabel (Api.asSrsStage asg))
-          , str ""
-          ]
+      let stageStr = case M.lookup (Api.subjId subj) (stSubjToAsg st) of
+                       Just asg -> Api.srsStageLabel (Api.asSrsStage asg)
+                       Nothing  -> "?"
+      in [ str ("Level:     " <> show (Api.subjLevel subj))
+         , str ("SRS stage: " <> stageStr)
+         , str ""
+         ]
 
     compSection =
       let comps = mapMaybe (\cid -> M.lookup cid (stAllSubjects st))

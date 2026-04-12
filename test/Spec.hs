@@ -204,6 +204,7 @@ apiSpec = describe "Api JSON parsing" $ do
     let validJson :: ByteString
         validJson = mconcat
           [ "{\"id\":1,\"object\":\"kanji\",\"data\":{"
+          , "\"level\":3,"
           , "\"characters\":\"\\u65e5\","
           , "\"meanings\":[{\"meaning\":\"Sun\",\"accepted_answer\":true}"
           , ",{\"meaning\":\"Day\",\"accepted_answer\":true}],"
@@ -228,6 +229,7 @@ apiSpec = describe "Api JSON parsing" $ do
     let validJson :: ByteString
         validJson = mconcat
           [ "{\"id\":2,\"object\":\"radical\",\"data\":{"
+          , "\"level\":1,"
           , "\"characters\":\"\\u4e00\","
           , "\"meanings\":[{\"meaning\":\"One\",\"accepted_answer\":true}],"
           , "\"component_subject_ids\":[]}}"
