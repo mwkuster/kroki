@@ -174,7 +174,7 @@ reviewsPerHourNext24 now s =
                                     s
                       | j <- [1..i]
                       ]
-        in (start, newN, openN)
+        in (end, newN, openN)
 
   in map mk ([0..23] :: [Int])
 
