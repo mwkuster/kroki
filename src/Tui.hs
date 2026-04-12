@@ -869,6 +869,9 @@ britishToAmerican = T.unwords . map convertWord . T.words
 
     applySuffixRules w
       | "iour"    `T.isSuffixOf` w                  = T.dropEnd 4 w <> "ior"
+      | "ourable" `T.isSuffixOf` w                  = T.dropEnd 7 w <> "orable"
+      | "ourably" `T.isSuffixOf` w                  = T.dropEnd 7 w <> "orably"
+      | "ourite"  `T.isSuffixOf` w                  = T.dropEnd 6 w <> "orite"
       | "our"     `T.isSuffixOf` w
       , w `notElem` ourBlacklist                     = T.dropEnd 3 w <> "or"
       | "yse"     `T.isSuffixOf` w                  = T.dropEnd 3 w <> "yze"
