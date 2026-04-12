@@ -3,7 +3,7 @@
 A minimal terminal client for [WaniKani](https://www.wanikani.com/) — do your kanji and vocabulary reviews without leaving the command line.
 
 ```
-┌── Queue ─────────────────────┐ ┌── Current ───────────────────────────────────────────────────────┐
+┌── Queue ─────────────────────┐ ┌── Current · Apprentice ──────────────────────────────────────────┐
 │ 日 (Kanji) [meaning]         │ │                                                                  │
 │ 学校 (Vocab) [reading]       │ │  日 — meaning                                                    │
 │ 一 (Radical) [meaning]       │ │                                                                  │
@@ -19,12 +19,13 @@ A minimal terminal client for [WaniKani](https://www.wanikani.com/) — do your 
 ## Features
 
 - Review meanings and readings in a split-pane TUI
+- Current SRS stage (Apprentice / Guru / Master / Enlightened / Burned) shown in the question border
 - Romaji input converted to hiragana live as you type (`gakkou` → `がっこう`)
 - British/American spelling normalisation for meaning answers
-- Per-item mnemonics and component breakdowns (Ctrl-a)
+- Per-item level, SRS stage, mnemonics, and component breakdowns (Ctrl-a)
 - Review schedule for the next 24 hours (Ctrl-v)
 - Optional pronunciation audio via an external player (Ctrl-p)
-- Submits results back to WaniKani at the end of each batch
+- Submits results back to WaniKani at the end of each batch; post-submit list shows the resulting SRS stage per item
 - Configurable batch size (0 = all available reviews)
 
 ## Installation
@@ -89,7 +90,7 @@ kroki init                   # (re)create config file interactively
 | `Enter` | Submit answer |
 | `Ctrl-o` | Override — mark current answer as correct |
 | `Ctrl-r` | Requeue — skip for now, no wrong-answer penalty |
-| `Ctrl-a` | All-info overlay (components, meanings, readings, mnemonics) |
+| `Ctrl-a` | All-info overlay (level, SRS stage, components, meanings, readings, mnemonics) |
 | `Ctrl-p` | Play pronunciation audio (vocabulary, requires `audio_player`) |
 | `Ctrl-u` | User info overlay |
 | `Ctrl-v` | Review schedule overlay |
