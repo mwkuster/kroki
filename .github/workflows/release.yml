@@ -8,6 +8,8 @@ jobs:
   build-linux-static:
     name: Linux (static, x86-64)
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     container:
       image: alpine:3.19
     steps:
@@ -18,7 +20,7 @@ jobs:
           apk add --no-cache \
             ghc cabal \
             musl-dev zlib-dev zlib-static \
-            gmp-dev gmp-static \
+            gmp-dev \
             libffi-dev \
             ncurses-dev ncurses-static \
             git
@@ -52,6 +54,8 @@ jobs:
   build-macos-arm64:
     name: macOS (arm64)
     runs-on: macos-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
