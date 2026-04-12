@@ -92,15 +92,15 @@ main = do
               then putStrLn "No reviews available right now."
               else do
                 let subjectIds = map Api.asSubjectId as
-                    subjToAsg  = M.fromList [ (Api.asSubjectId a, Api.asId a) | a <- as ]
+                    subjToAsg  = M.fromList [ (Api.asSubjectId a, a) | a <- as ]
                 subjects <- Api.getSubjectsByIds t subjectIds
                 let compIds = nub [ cid | s <- subjects, cid <- Api.subjComponentIds s ]
                 compSubjects <- Api.getSubjectsByIds t compIds
                 let allSubjMap = M.fromList [ (Api.subjId s, s) | s <- subjects ++ compSubjects ]
                     asgToSubj  = M.fromList
-                      [ (asgId, subj)
+                      [ (Api.asId asg, subj)
                       | subj <- subjects
-                      , Just asgId <- [M.lookup (Api.subjId subj) subjToAsg]
+                      , Just asg <- [M.lookup (Api.subjId subj) subjToAsg]
                       ]
                 let audioPlayer = Config.cfgAudioPlayer cfg
                 let refreshSummary = do

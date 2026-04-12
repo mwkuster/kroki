@@ -103,7 +103,7 @@ data AppState = AppState
   , stQueueWidget  :: L.List Name Q
   , stInput        :: Text
   , stProgress     :: M.Map Int Progress
-  , stSubjToAsg    :: M.Map Int Int
+  , stSubjToAsg    :: M.Map Int Api.Assignment
   , stRequeueAfter :: Int
   , stCorrect      :: Int
   , stWrong        :: Int
@@ -126,7 +126,7 @@ data AppState = AppState
 -- Entry point
 --------------------------------------------------------------------------------
 
-runStudyTui :: Int -> Maybe String -> Api.User -> Api.Summary -> UTCTime -> TimeZone -> M.Map Int Api.Subject -> M.Map Int Int -> [Api.Subject] -> IO (UTCTime, Api.Summary) -> ([Submission] -> IO SubmitResult) -> IO Bool
+runStudyTui :: Int -> Maybe String -> Api.User -> Api.Summary -> UTCTime -> TimeZone -> M.Map Int Api.Subject -> M.Map Int Api.Assignment -> [Api.Subject] -> IO (UTCTime, Api.Summary) -> ([Submission] -> IO SubmitResult) -> IO Bool
 runStudyTui rqAfter audioPlayer user summary now tz allSubjects subjToAsg subjects refreshFn submitFn = do
   let queue0 = concatMap mkQuestions subjects
       prog0  = M.fromList [ (Api.subjId s, initProgress s) | s <- subjects ]
@@ -320,7 +320,8 @@ drawAllInfo q st =
     viewport InfoViewport Vertical $
       padAll 1 $
         vBox $
-             compSection
+             assignSection
+          ++ compSection
           ++ [ str ("Meanings:  " <> T.unpack (T.intercalate ", " (Api.subjMeanings subj))) ]
           ++ readSection
           ++ mnSection "Meaning mnemonic" (Api.subjMeaningMnemonic subj)
@@ -331,6 +332,15 @@ drawAllInfo q st =
     subj  = qSubject q
     label = fromMaybe "?" (Api.subjChars subj)
          <> " · " <> subjTypeLabel (Api.subjType subj)
+
+    assignSection =
+      case M.lookup (Api.subjId subj) (stSubjToAsg st) of
+        Nothing  -> []
+        Just asg ->
+          [ str ("Level:     " <> show (Api.asLevel asg))
+          , str ("SRS stage: " <> Api.srsStageLabel (Api.asSrsStage asg))
+          , str ""
+          ]
 
     compSection =
       let comps = mapMaybe (\cid -> M.lookup cid (stAllSubjects st))
@@ -713,7 +723,8 @@ mkSubmissions st =
       , subWrongReading = pReadingWrong p
       }
   | (sid, p) <- M.toList (stProgress st)
-  , Just asgId <- [M.lookup sid (stSubjToAsg st)]
+  , Just asg <- [M.lookup sid (stSubjToAsg st)]
+  , let asgId = Api.asId asg
   ]
 
 --------------------------------------------------------------------------------

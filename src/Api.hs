@@ -12,6 +12,8 @@ module Api
   , nextReviewBucket
   , reviewsPerHourNext24
 
+  , SrsStage(..)
+  , srsStageLabel
   , Assignment(..)
   , getAvailableAssignments
 
@@ -179,16 +181,39 @@ reviewsPerHourNext24 now s =
 -- Assignments (to get what's available now)
 --------------------------------------------------------------------------------
 
+data SrsStage = Initiate | Apprentice | Guru | Master | Enlightened | Burned
+  deriving (Show, Eq)
+
+srsStageLabel :: SrsStage -> String
+srsStageLabel Initiate   = "Initiate"
+srsStageLabel Apprentice = "Apprentice"
+srsStageLabel Guru       = "Guru"
+srsStageLabel Master     = "Master"
+srsStageLabel Enlightened = "Enlightened"
+srsStageLabel Burned     = "Burned"
+
+srsStageFromInt :: Int -> SrsStage
+srsStageFromInt 0         = Initiate
+srsStageFromInt n | n <= 4 = Apprentice
+srsStageFromInt n | n <= 6 = Guru
+srsStageFromInt 7         = Master
+srsStageFromInt 8         = Enlightened
+srsStageFromInt _         = Burned
+
 data Assignment = Assignment
   { asId        :: Int
   , asSubjectId :: Int
+  , asLevel     :: Int
+  , asSrsStage  :: SrsStage
   } deriving (Show, Eq)
 
 newtype AssignmentsEnvelope = AssignmentsEnvelope { aeData :: [AssignmentData] } deriving (Show)
 
 data AssignmentData = AssignmentData
-  { adId      :: Int
-  , adSubject :: Int
+  { adId        :: Int
+  , adSubject   :: Int
+  , adLevel     :: Int
+  , adSrsStage  :: Int
   } deriving (Show)
 
 instance FromJSON AssignmentsEnvelope where
@@ -197,13 +222,16 @@ instance FromJSON AssignmentsEnvelope where
 
 instance FromJSON AssignmentData where
   parseJSON = withObject "AssignmentData" $ \o -> do
-    i <- o .: "id"
-    d <- o .: "data"
-    s <- d .: "subject_id"
-    pure (AssignmentData i s)
+    i     <- o .: "id"
+    d     <- o .: "data"
+    s     <- d .: "subject_id"
+    lvl   <- d .: "level"
+    stage <- d .: "srs_stage"
+    pure (AssignmentData i s lvl stage)
 
 toAssignment :: AssignmentData -> Assignment
-toAssignment (AssignmentData i s) = Assignment i s
+toAssignment (AssignmentData i s lvl stage) =
+  Assignment i s lvl (srsStageFromInt stage)
 
 getAvailableAssignments :: String -> UTCTime -> Int -> IO [Assignment]
 getAvailableAssignments token now n = runReq defaultHttpConfig $ do
