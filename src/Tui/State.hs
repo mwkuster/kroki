@@ -1,0 +1,396 @@
+{-# LANGUAGE OverloadedStrings #-}
+
+module Tui.State
+  ( -- Types
+    Name(..)
+  , Overlay(..)
+  , Mode(..)
+  , QKind(..)
+  , Q(..)
+  , Submission(..)
+  , SubmitResult(..)
+  , Progress(..)
+  , AppState(..)
+
+    -- Session logic
+  , currentQuestion
+  , submitAnswer
+  , advanceCorrect
+  , advanceOverride
+  , requeueWrong
+  , requeueOnly
+  , requeueAfterK
+  , mkQueueWidget
+
+    -- Progress / submissions
+  , markOk
+  , incWrong
+  , mkSubmissions
+  , initProgress
+
+    -- Setup
+  , mkQuestions
+  , acceptedReadings
+
+    -- Answer checking / display
+  , checkAnswer
+  , normMeaning
+  , normReading
+  , britishToAmerican
+  , displayItem
+  , kindLabel
+  , displayInput
+  , hasAudio
+  ) where
+
+import qualified Api
+import qualified Romaji
+
+import qualified Brick.Widgets.List as L
+import qualified Data.Map.Strict as M
+import qualified Data.Vector as Vec
+import Data.Maybe (isJust)
+import Data.Text (Text)
+import qualified Data.Text as T
+import Data.Time (UTCTime)
+import Data.Time.LocalTime (TimeZone)
+
+--------------------------------------------------------------------------------
+-- Public data
+--------------------------------------------------------------------------------
+
+data QKind = QMeaning | QReading
+  deriving (Show, Eq, Ord)
+
+data Q = Q
+  { qSubject :: Api.Subject
+  , qKind    :: QKind
+  } deriving (Show, Eq)
+
+data Submission = Submission
+  { subAssignmentId :: Api.AssignmentId
+  , subWrongMeaning :: Int
+  , subWrongReading :: Int
+  } deriving (Show, Eq)
+
+data SubmitResult = SubmitResult
+  { srMessage :: String
+  , srHasMore :: Bool
+  , srDetails :: [String]   -- per-submission lines for TUI display
+  } deriving (Show)
+
+data Progress = Progress
+  { pMeaningOk     :: Bool
+  , pReadingNeeded :: Bool
+  , pReadingOk     :: Bool
+  , pMeaningWrong  :: Int
+  , pReadingWrong  :: Int
+  } deriving (Show, Eq)
+
+--------------------------------------------------------------------------------
+-- TUI state
+--------------------------------------------------------------------------------
+
+data Name = QueueList | InfoViewport | UserViewport | ReviewViewport | DoneViewport
+  deriving (Ord, Eq, Show)
+
+data Overlay = NoOverlay | AllInfo | UserInfo | ReviewSchedule
+  deriving (Show, Eq)
+
+data Mode
+  = Normal
+  | WrongAnswer Text [String]  -- user's input, accepted answers
+  | Feedback Text
+  | ConfirmSubmit
+  | Finished
+  deriving (Show, Eq)
+
+data AppState = AppState
+  { stQueue        :: [Q]
+  , stQueueWidget  :: L.List Name Q
+  , stInput        :: Text
+  , stProgress     :: M.Map Api.SubjectId Progress
+  , stSubjToAsg    :: M.Map Api.SubjectId Api.Assignment
+  , stRequeueAfter :: Int
+  , stCorrect      :: Int
+  , stWrong        :: Int
+  , stOverridden   :: Int
+  , stMode         :: Mode
+  , stBanner       :: Maybe Text
+  , stError        :: Maybe Text                       -- transient error message (network etc.)
+  , stHasMore      :: Bool
+  , stWantsMore    :: Bool
+  , stAudioPlayer   :: Maybe String                    -- command to play audio (e.g. "mpv --really-quiet")
+  , stSubmitDetails :: [String]                        -- per-submission lines shown after submit
+  , stOverlay       :: Overlay                         -- active info overlay
+  , stAllSubjects   :: M.Map Api.SubjectId Api.Subject -- full subject map incl. components
+  , stUser          :: Api.User
+  , stSummary       :: Api.Summary
+  , stNow           :: UTCTime
+  , stTZ            :: TimeZone
+  }
+
+--------------------------------------------------------------------------------
+-- Session logic
+--------------------------------------------------------------------------------
+
+currentQuestion :: AppState -> Maybe Q
+currentQuestion st =
+  case stQueue st of
+    []    -> Nothing
+    (q:_) -> Just q
+
+submitAnswer :: Q -> Text -> AppState -> AppState
+submitAnswer q answer st =
+  let (ok, expected) = checkAnswer q answer
+  in if ok
+       then advanceCorrect q st
+       else st
+          { stInput = T.empty
+          , stMode  = WrongAnswer answer expected
+          }
+
+advanceCorrect :: Q -> AppState -> AppState
+advanceCorrect q st =
+  let prog'  = markOk (qSubject q) (qKind q) (stProgress st)
+      queue' = drop 1 (stQueue st)
+  in st
+     { stQueue       = queue'
+     , stQueueWidget = mkQueueWidget queue'
+     , stProgress    = prog'
+     , stCorrect     = stCorrect st + 1
+     , stInput       = T.empty
+     , stMode        = if null queue' then Finished else Feedback "✓"
+     }
+
+advanceOverride :: Q -> AppState -> AppState
+advanceOverride q st =
+  let prog'  = markOk (qSubject q) (qKind q) (stProgress st)
+      queue' = drop 1 (stQueue st)
+  in st
+     { stQueue       = queue'
+     , stQueueWidget = mkQueueWidget queue'
+     , stProgress    = prog'
+     , stCorrect     = stCorrect st + 1
+     , stOverridden  = stOverridden st + 1
+     , stInput       = T.empty
+     , stMode        = if null queue' then Finished else Feedback "override"
+     }
+
+requeueWrong :: Q -> AppState -> AppState
+requeueWrong q st =
+  let prog'  = incWrong (qSubject q) (qKind q) (stProgress st)
+      queue' = requeueAfterK (stRequeueAfter st) q (drop 1 (stQueue st))
+  in st
+     { stQueue       = queue'
+     , stQueueWidget = mkQueueWidget queue'
+     , stProgress    = prog'
+     , stWrong       = stWrong st + 1
+     , stInput       = T.empty
+     , stMode        = Feedback "requeued"
+     }
+
+-- | Requeue without recording a wrong answer (no penalty to wrong counts).
+requeueOnly :: Q -> AppState -> AppState
+requeueOnly q st =
+  let queue' = requeueAfterK (stRequeueAfter st) q (drop 1 (stQueue st))
+  in st
+     { stQueue       = queue'
+     , stQueueWidget = mkQueueWidget queue'
+     , stInput       = T.empty
+     , stMode        = Feedback "requeued"
+     }
+
+requeueAfterK :: Int -> Q -> [Q] -> [Q]
+requeueAfterK k q qs =
+  let k' = max 0 k
+      (front, back) = splitAt k' qs
+  in front ++ [q] ++ back
+
+mkQueueWidget :: [Q] -> L.List Name Q
+mkQueueWidget qs =
+  L.list QueueList (Vec.fromList qs) 1
+
+--------------------------------------------------------------------------------
+-- Progress / submissions
+--------------------------------------------------------------------------------
+
+markOk :: Api.Subject -> QKind -> M.Map Api.SubjectId Progress -> M.Map Api.SubjectId Progress
+markOk subj kind mp =
+  let sid = Api.subjId subj
+  in M.adjust upd sid mp
+  where
+    upd p =
+      case kind of
+        QMeaning -> p { pMeaningOk = True }
+        QReading -> p { pReadingOk = True }
+
+incWrong :: Api.Subject -> QKind -> M.Map Api.SubjectId Progress -> M.Map Api.SubjectId Progress
+incWrong subj kind mp =
+  let sid = Api.subjId subj
+  in M.adjust upd sid mp
+  where
+    upd p =
+      case kind of
+        QMeaning -> p { pMeaningWrong = pMeaningWrong p + 1 }
+        QReading -> p { pReadingWrong = pReadingWrong p + 1 }
+
+mkSubmissions :: AppState -> [Submission]
+mkSubmissions st =
+  [ Submission
+      { subAssignmentId = asgId
+      , subWrongMeaning = pMeaningWrong p
+      , subWrongReading = pReadingWrong p
+      }
+  | (sid, p) <- M.toList (stProgress st)
+  , Just asg <- [M.lookup sid (stSubjToAsg st)]
+  , let asgId = Api.asId asg
+  ]
+
+--------------------------------------------------------------------------------
+-- Setup helpers
+--------------------------------------------------------------------------------
+
+mkQuestions :: Api.Subject -> [Q]
+mkQuestions s =
+  let rs = acceptedReadings s
+  in Q s QMeaning
+     : [ Q s QReading
+       | Api.subjType s /= Api.Radical
+       , not (null rs)
+       ]
+
+initProgress :: Api.Subject -> Progress
+initProgress s =
+  let needsReading =
+        Api.subjType s /= Api.Radical
+        && not (null (acceptedReadings s))
+  in Progress False needsReading False 0 0
+
+acceptedReadings :: Api.Subject -> [Text]
+acceptedReadings s =
+  filter (not . T.null . T.strip) (Api.subjReadings s)
+
+--------------------------------------------------------------------------------
+-- Answer checking / display
+--------------------------------------------------------------------------------
+
+checkAnswer :: Q -> Text -> (Bool, [String])
+checkAnswer (Q subj kind) ans =
+  case kind of
+    QMeaning ->
+      let acceptedNorm = map normMeaning (Api.subjMeanings subj)
+      in ( normMeaning ans `elem` acceptedNorm
+         , map T.unpack (Api.subjMeanings subj)
+         )
+    QReading ->
+      let rs = acceptedReadings subj
+          acceptedNorm = map normReading rs
+      in ( normReading ans `elem` acceptedNorm
+         , map T.unpack rs
+         )
+
+displayItem :: Api.Subject -> String
+displayItem s =
+  let tag =
+        case Api.subjType s of
+          Api.Kanji          -> " (Kanji)"
+          Api.Radical        -> " (Radical)"
+          Api.Vocabulary     -> " (Vocab)"
+          Api.KanaVocabulary -> " (Vocab)"
+      core =
+        case Api.subjChars s of
+          Just c | let cs = T.strip c, not (T.null cs) -> T.unpack cs
+          _ ->
+            let m = case Api.subjMeanings s of
+                      (x:_) -> T.unpack x
+                      []    -> "?"
+            in m <> " (#" <> show (Api.subjId s) <> ")"
+  in core <> tag
+
+kindLabel :: QKind -> String
+kindLabel QMeaning = "meaning"
+kindLabel QReading = "reading"
+
+displayInput :: QKind -> Text -> Text
+displayInput QReading t = Romaji.romajiToHiraganaLive t
+displayInput QMeaning t = t
+
+hasAudio :: Q -> AppState -> Bool
+hasAudio q st =
+  not (null (Api.subjAudioUrls (qSubject q))) && isJust (stAudioPlayer st)
+
+normMeaning :: Text -> Text
+normMeaning = collapseSpaces . britishToAmerican . T.toCaseFold . T.strip
+
+-- | Convert British English spellings to American English, word by word.
+-- Applied after case-folding so all lookups are lowercase.
+britishToAmerican :: Text -> Text
+britishToAmerican = T.unwords . map convertWord . T.words
+  where
+    convertWord w = M.findWithDefault (applySuffixRules w) w wordTable
+
+    -- Word-pair table for cases that don't follow simple suffix rules.
+    -- All keys must be lowercase (applied after toCaseFold).
+    wordTable :: M.Map Text Text
+    wordTable = M.fromList $
+         re "centre"   "center"
+      ++ re "theatre"  "theater"
+      ++ re "fibre"    "fiber"
+      ++ re "litre"    "liter"
+      ++ re "metre"    "meter"
+      ++ re "spectre"  "specter"
+      ++ re "sabre"    "saber"
+      ++ re "calibre"  "caliber"
+      ++ re "lustre"   "luster"
+      ++ re "sombre"   "somber"
+      ++ [ ("defence",  "defense"),  ("defences",  "defenses")
+         , ("offence",  "offense"),  ("offences",  "offenses")
+         , ("pretence", "pretense"), ("pretences", "pretenses")
+         , ("licence",  "license"),  ("licences",  "licenses")
+         , ("practise", "practice")
+         ]
+      where
+        re b a = [(b, a), (b <> "s", a <> "s")]
+
+    applySuffixRules w
+      | "iour"    `T.isSuffixOf` w                  = T.dropEnd 4 w <> "ior"
+      | "ourable" `T.isSuffixOf` w                  = T.dropEnd 7 w <> "orable"
+      | "ourably" `T.isSuffixOf` w                  = T.dropEnd 7 w <> "orably"
+      | "ourite"  `T.isSuffixOf` w                  = T.dropEnd 6 w <> "orite"
+      | "our"     `T.isSuffixOf` w
+      , w `notElem` ourBlacklist                     = T.dropEnd 3 w <> "or"
+      | "yse"     `T.isSuffixOf` w                  = T.dropEnd 3 w <> "yze"
+      | "isation" `T.isSuffixOf` w                  = T.dropEnd 7 w <> "ization"
+      | "ise"     `T.isSuffixOf` w
+      , w `notElem` iseBlacklist                     = T.dropEnd 3 w <> "ize"
+      | "ogue"    `T.isSuffixOf` w
+      , w `notElem` ogueBlacklist                    = T.dropEnd 4 w <> "og"
+      | otherwise                                    = w
+
+    ourBlacklist =
+      [ "four", "pour", "hour", "your", "sour", "dour", "tour", "flour"
+      , "amour", "contour", "detour", "velour", "troubadour", "paramour" ]
+
+    iseBlacklist =
+      [ "rise", "wise", "guise", "surprise", "revise", "advise", "devise"
+      , "enterprise", "exercise", "franchise", "improvise", "promise"
+      , "supervise", "advertise", "comprise", "disguise", "arise"
+      , "otherwise", "likewise", "clockwise", "lengthwise"
+      , "prise", "demise", "surmise", "premise", "treatise"
+      , "precise", "concise"
+      , "noise", "poise", "turquoise", "tortoise", "porpoise" ]
+
+    ogueBlacklist =
+      [ "rogue", "vogue", "pirogue", "brogue" ]
+
+normReading :: Text -> Text
+normReading t =
+  let t' = T.strip t
+  in if T.all (\c -> (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '\'') t'
+       then Romaji.romajiToHiragana (T.toCaseFold t')
+       else T.toCaseFold t'
+
+collapseSpaces :: Text -> Text
+collapseSpaces =
+  T.unwords . filter (not . T.null) . T.words
