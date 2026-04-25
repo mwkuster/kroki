@@ -16,10 +16,16 @@ import qualified Tui
 -- Helpers
 --------------------------------------------------------------------------------
 
+sid :: Int -> Api.SubjectId
+sid = Api.SubjectId
+
+aid :: Int -> Api.AssignmentId
+aid = Api.AssignmentId
+
 -- Minimal kanji subject for testing
 kanjiSubj :: Api.Subject
 kanjiSubj = Api.Subject
-  { Api.subjId              = 1
+  { Api.subjId              = sid 1
   , Api.subjType            = Api.Kanji
   , Api.subjLevel           = 1
   , Api.subjChars           = Just "日"
@@ -35,7 +41,7 @@ kanjiSubj = Api.Subject
 -- Radical (no reading question)
 radicalSubj :: Api.Subject
 radicalSubj = Api.Subject
-  { Api.subjId              = 2
+  { Api.subjId              = sid 2
   , Api.subjType            = Api.Radical
   , Api.subjLevel           = 1
   , Api.subjChars           = Just "一"
@@ -51,7 +57,7 @@ radicalSubj = Api.Subject
 -- Vocab subject
 vocabSubj :: Api.Subject
 vocabSubj = Api.Subject
-  { Api.subjId              = 3
+  { Api.subjId              = sid 3
   , Api.subjType            = Api.Vocabulary
   , Api.subjLevel           = 3
   , Api.subjChars           = Just "学校"
@@ -68,7 +74,7 @@ mkQ :: Api.Subject -> Tui.QKind -> Tui.Q
 mkQ s k = Tui.Q { Tui.qSubject = s, Tui.qKind = k }
 
 -- Bare AppState with only progress/subjToAsg populated (for mkSubmissions)
-stateWith :: M.Map Int Tui.Progress -> M.Map Int Api.Assignment -> Tui.AppState
+stateWith :: M.Map Api.SubjectId Tui.Progress -> M.Map Api.SubjectId Api.Assignment -> Tui.AppState
 stateWith prog subjToAsg = Tui.AppState
   { Tui.stQueue        = []
   , Tui.stQueueWidget  = L.list Tui.QueueList (Vec.fromList []) 1
@@ -81,6 +87,7 @@ stateWith prog subjToAsg = Tui.AppState
   , Tui.stOverridden   = 0
   , Tui.stMode         = Tui.Normal
   , Tui.stBanner       = Nothing
+  , Tui.stError        = Nothing
   , Tui.stHasMore      = False
   , Tui.stWantsMore    = False
   , Tui.stAudioPlayer   = Nothing
@@ -186,12 +193,12 @@ spec = do
         fst (Tui.checkAnswer (mkQ kanjiSubj Tui.QMeaning) "   ") `shouldBe` False
 
   describe "requeueAfterK" $ do
-    let qs = map (\n -> mkQ kanjiSubj { Api.subjId = n } Tui.QMeaning) [1..5]
+    let qs = map (\n -> mkQ kanjiSubj { Api.subjId = sid n } Tui.QMeaning) [1..5]
         q0 = mkQ kanjiSubj Tui.QMeaning
 
     it "inserts at position k" $
       map (Api.subjId . Tui.qSubject) (Tui.requeueAfterK 2 q0 qs)
-        `shouldBe` [1, 2, 1, 3, 4, 5]
+        `shouldBe` map sid [1, 2, 1, 3, 4, 5]
     it "k=0 puts item at front" $
       Api.subjId (Tui.qSubject (head (Tui.requeueAfterK 0 q0 qs)))
         `shouldBe` Api.subjId kanjiSubj
@@ -205,8 +212,8 @@ spec = do
 
   describe "requeueOnly" $ do
     let q0   = mkQ kanjiSubj Tui.QMeaning
-        qs   = map (\n -> mkQ (kanjiSubj { Api.subjId = n }) Tui.QMeaning) [2..4]
-        st0  = (stateWith (M.singleton 1 (Tui.initProgress kanjiSubj)) M.empty)
+        qs   = map (\n -> mkQ (kanjiSubj { Api.subjId = sid n }) Tui.QMeaning) [2..4]
+        st0  = (stateWith (M.singleton (sid 1) (Tui.initProgress kanjiSubj)) M.empty)
                  { Tui.stQueue        = q0 : qs
                  , Tui.stQueueWidget  = L.list Tui.QueueList (Vec.fromList (q0 : qs)) 1
                  , Tui.stRequeueAfter = 2
@@ -219,15 +226,15 @@ spec = do
 
     it "does not increment pMeaningWrong" $ do
       let st' = Tui.requeueOnly q0 st0
-      Tui.pMeaningWrong (Tui.stProgress st' M.! 1) `shouldBe` 0
+      Tui.pMeaningWrong (Tui.stProgress st' M.! sid 1) `shouldBe` 0
 
     it "removes item from front of queue" $ do
       let st' = Tui.requeueOnly q0 st0
-      Api.subjId (Tui.qSubject (head (Tui.stQueue st'))) `shouldBe` 2
+      Api.subjId (Tui.qSubject (head (Tui.stQueue st'))) `shouldBe` sid 2
 
     it "reinserts item at requeue position" $ do
       let st' = Tui.requeueOnly q0 st0
-      map (Api.subjId . Tui.qSubject) (Tui.stQueue st') `shouldBe` [2, 3, 1, 4]
+      map (Api.subjId . Tui.qSubject) (Tui.stQueue st') `shouldBe` map sid [2, 3, 1, 4]
 
     it "clears input" $ do
       let st' = Tui.requeueOnly q0 st0 { Tui.stInput = "foo" }
@@ -252,76 +259,76 @@ spec = do
       Tui.pReadingWrong p `shouldBe` 0
 
   describe "markOk" $ do
-    let prog0 = M.singleton 1 (Tui.initProgress kanjiSubj)
+    let prog0 = M.singleton (sid 1) (Tui.initProgress kanjiSubj)
 
     it "marks meaning ok" $ do
       let result = Tui.markOk kanjiSubj Tui.QMeaning prog0
-      Tui.pMeaningOk (result M.! 1) `shouldBe` True
+      Tui.pMeaningOk (result M.! sid 1) `shouldBe` True
 
     it "marks reading ok" $ do
       let result = Tui.markOk kanjiSubj Tui.QReading prog0
-      Tui.pReadingOk (result M.! 1) `shouldBe` True
+      Tui.pReadingOk (result M.! sid 1) `shouldBe` True
 
     it "marking meaning ok does not affect readingOk" $ do
       let result = Tui.markOk kanjiSubj Tui.QMeaning prog0
-      Tui.pReadingOk (result M.! 1) `shouldBe` False
+      Tui.pReadingOk (result M.! sid 1) `shouldBe` False
 
     it "marking reading ok does not affect meaningOk" $ do
       let result = Tui.markOk kanjiSubj Tui.QReading prog0
-      Tui.pMeaningOk (result M.! 1) `shouldBe` False
+      Tui.pMeaningOk (result M.! sid 1) `shouldBe` False
 
     it "does not affect other subjects" $
-      M.lookup 99 (Tui.markOk kanjiSubj Tui.QMeaning prog0) `shouldBe` Nothing
+      M.lookup (sid 99) (Tui.markOk kanjiSubj Tui.QMeaning prog0) `shouldBe` Nothing
 
   describe "incWrong" $ do
-    let prog0 = M.singleton 1 (Tui.initProgress kanjiSubj)
+    let prog0 = M.singleton (sid 1) (Tui.initProgress kanjiSubj)
 
     it "increments meaning wrong count" $
-      Tui.pMeaningWrong (Tui.incWrong kanjiSubj Tui.QMeaning prog0 M.! 1) `shouldBe` 1
+      Tui.pMeaningWrong (Tui.incWrong kanjiSubj Tui.QMeaning prog0 M.! sid 1) `shouldBe` 1
     it "increments reading wrong count" $
-      Tui.pReadingWrong (Tui.incWrong kanjiSubj Tui.QReading prog0 M.! 1) `shouldBe` 1
+      Tui.pReadingWrong (Tui.incWrong kanjiSubj Tui.QReading prog0 M.! sid 1) `shouldBe` 1
     it "meaning wrong does not affect reading wrong" $
-      Tui.pReadingWrong (Tui.incWrong kanjiSubj Tui.QMeaning prog0 M.! 1) `shouldBe` 0
+      Tui.pReadingWrong (Tui.incWrong kanjiSubj Tui.QMeaning prog0 M.! sid 1) `shouldBe` 0
     it "reading wrong does not affect meaning wrong" $
-      Tui.pMeaningWrong (Tui.incWrong kanjiSubj Tui.QReading prog0 M.! 1) `shouldBe` 0
+      Tui.pMeaningWrong (Tui.incWrong kanjiSubj Tui.QReading prog0 M.! sid 1) `shouldBe` 0
     it "accumulates multiple wrongs" $ do
       let result = ( Tui.incWrong kanjiSubj Tui.QMeaning
                    . Tui.incWrong kanjiSubj Tui.QMeaning
                    $ prog0
-                   ) M.! 1
+                   ) M.! sid 1
       Tui.pMeaningWrong result `shouldBe` 2
 
   describe "mkSubmissions" $ do
-    let mkAsg sid asgId = Api.Assignment { Api.asId = asgId, Api.asSubjectId = sid, Api.asSrsStage = Api.Apprentice, Api.asSrsStageNum = 3 }
-        subjToAsg = M.fromList [(1, mkAsg 1 101), (3, mkAsg 3 303)]
+    let mkAsg s a = Api.Assignment { Api.asId = a, Api.asSubjectId = s, Api.asSrsStage = Api.Apprentice }
+        subjToAsg = M.fromList [(sid 1, mkAsg (sid 1) (aid 101)), (sid 3, mkAsg (sid 3) (aid 303))]
 
     it "produces one submission per subject with an assignment" $ do
       let prog = M.fromList
-            [ (1, (Tui.initProgress kanjiSubj) { Tui.pMeaningWrong = 0, Tui.pReadingWrong = 1 })
-            , (3, (Tui.initProgress vocabSubj)  { Tui.pMeaningWrong = 2, Tui.pReadingWrong = 0 })
+            [ (sid 1, (Tui.initProgress kanjiSubj) { Tui.pMeaningWrong = 0, Tui.pReadingWrong = 1 })
+            , (sid 3, (Tui.initProgress vocabSubj)  { Tui.pMeaningWrong = 2, Tui.pReadingWrong = 0 })
             ]
           subs = Tui.mkSubmissions (stateWith prog subjToAsg)
       length subs `shouldBe` 2
 
     it "carries wrong counts into submission" $ do
-      let prog = M.singleton 1
+      let prog = M.singleton (sid 1)
             (Tui.initProgress kanjiSubj) { Tui.pMeaningWrong = 3, Tui.pReadingWrong = 1 }
           [sub] = Tui.mkSubmissions (stateWith prog subjToAsg)
       Tui.subWrongMeaning sub `shouldBe` 3
       Tui.subWrongReading sub `shouldBe` 1
 
     it "uses the correct assignment id" $ do
-      let prog  = M.singleton 1 (Tui.initProgress kanjiSubj)
+      let prog  = M.singleton (sid 1) (Tui.initProgress kanjiSubj)
           [sub] = Tui.mkSubmissions (stateWith prog subjToAsg)
-      Tui.subAssignmentId sub `shouldBe` 101
+      Tui.subAssignmentId sub `shouldBe` aid 101
 
     it "excludes subjects without an assignment mapping" $ do
-      let prog = M.singleton 99 (Tui.initProgress (kanjiSubj { Api.subjId = 99 }))
+      let prog = M.singleton (sid 99) (Tui.initProgress (kanjiSubj { Api.subjId = sid 99 }))
           subs = Tui.mkSubmissions (stateWith prog subjToAsg)
       subs `shouldBe` []
 
     it "includes subject with zero wrong counts" $ do
-      let prog  = M.singleton 1 (Tui.initProgress kanjiSubj)
+      let prog  = M.singleton (sid 1) (Tui.initProgress kanjiSubj)
           [sub] = Tui.mkSubmissions (stateWith prog subjToAsg)
       Tui.subWrongMeaning sub `shouldBe` 0
       Tui.subWrongReading sub `shouldBe` 0

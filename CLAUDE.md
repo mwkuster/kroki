@@ -64,9 +64,11 @@ data Progress = Progress
 data Submission = Submission
   { subAssignmentId :: Int, subWrongMeaning :: Int, subWrongReading :: Int }
 
--- SRS stage category (Initiate/Apprentice/Guru/Master/Enlightened/Burned)
--- Assignment carries both the enum and the raw integer stage (asSrsStageNum)
--- for penalty calculations. Subject carries the WaniKani level (subjLevel).
+-- SRS stage category (Initiate/Apprentice/Guru/Master/Enlightened/Burned).
+-- Assignment carries the current SRS stage; the post-review stage is read
+-- from the createReview response (rrEndingSrsStage) rather than computed
+-- locally, so it can never drift from what WaniKani actually persisted.
+-- Subject carries the WaniKani level (subjLevel).
 ```
 
 Answer normalization: meanings use case-folding + space-collapsing; readings use romaji→hiragana conversion via `Romaji.hs`.

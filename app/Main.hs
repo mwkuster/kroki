@@ -7,6 +7,7 @@ import qualified Tui
 import Util (strPadLeft, strPadRight)
 
 import Control.Applicative ((<|>))
+import Control.Exception (SomeException, displayException, try)
 import System.Environment (lookupEnv)
 import System.Exit (die)
 
@@ -121,45 +122,61 @@ main = do
                 if wantsMore then runBatch else pure ()
 
           submitBatch asgToInfo subs = do
-            let details = map (fmtSub asgToInfo) subs
             ts <- getCurrentTime
-            mapM_
-              (\s ->
-                Api.createReview t
-                  (Tui.subAssignmentId s)
-                  (Tui.subWrongMeaning s)
-                  (Tui.subWrongReading s)
-                  ts
-              )
-              subs
+            outcomes <- mapM (postReview ts) subs
             now2     <- getCurrentTime
             summary2 <- Api.getSummary t
             as2      <- Api.getAvailableAssignments t now2 n
+            let details   = map (fmtSub asgToInfo) outcomes
+                succeeded = length [() | (_, Right _) <- outcomes]
+                failed    = length outcomes - succeeded
+                msg       = "Submitted " <> show succeeded
+                         <> (if failed == 0
+                              then ""
+                              else " (" <> show failed <> " failed)")
+                         <> ". Reviews available now: "
+                         <> show (Api.reviewsAvailableNow now2 summary2)
             pure Tui.SubmitResult
-              { Tui.srMessage = "Submitted. Reviews available now: "
-                             <> show (Api.reviewsAvailableNow now2 summary2)
+              { Tui.srMessage = msg
               , Tui.srHasMore = not (null as2)
               , Tui.srDetails = details
               }
 
+          postReview ts s = do
+            r <- try (Api.createReview t
+                       (Tui.subAssignmentId s)
+                       (Tui.subWrongMeaning s)
+                       (Tui.subWrongReading s)
+                       ts) :: IO (Either SomeException Api.ReviewResult)
+            pure (s, r)
+
       runBatch
 
-fmtSub :: M.Map Int (Api.Subject, Api.Assignment) -> Tui.Submission -> String
-fmtSub asgToInfo s =
+fmtSub
+  :: M.Map Api.AssignmentId (Api.Subject, Api.Assignment)
+  -> (Tui.Submission, Either SomeException Api.ReviewResult)
+  -> String
+fmtSub asgToInfo (s, eResult) =
   let wrongTotal = Tui.subWrongMeaning s + Tui.subWrongReading s
-      (name, stageSuffix) =
+      name =
         case M.lookup (Tui.subAssignmentId s) asgToInfo of
-          Just (subj, asg) ->
-            let future = Api.srsStageLabel (Api.nextSrsStage asg wrongTotal)
-            in (subjLabel subj, " → " <> future)
-          Nothing ->
-            ("assignment #" <> show (Tui.subAssignmentId s), "")
+          Just (subj, _) -> subjLabel subj
+          Nothing        -> "assignment #" <> show (Tui.subAssignmentId s)
+      stageSuffix = case eResult of
+        Right rr -> " → " <> Api.srsStageLabel (Api.rrEndingSrsStage rr)
+        Left  e  -> " (failed: " <> shortErr e <> ")"
       status
         | wrongTotal == 0 = "correct"
         | otherwise       = "incorrect"
                          <> " (m:" <> show (Tui.subWrongMeaning s)
                          <> " r:" <> show (Tui.subWrongReading s) <> ")"
   in name <> "  " <> status <> stageSuffix
+
+shortErr :: SomeException -> String
+shortErr e =
+  let msg     = displayException e
+      oneLine = takeWhile (/= '\n') msg
+  in if length oneLine > 120 then take 117 oneLine <> "..." else oneLine
 
 subjLabel :: Api.Subject -> String
 subjLabel subj =
