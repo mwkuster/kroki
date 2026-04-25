@@ -18,12 +18,12 @@ module Api
   , SrsStage(..)
   , srsStageLabel
   , Assignment(..)
-  , nextSrsStage
   , getAvailableAssignments
 
   , SubjectType(..)
   , Subject(..)
   , getSubjectsByIds
+  , ReviewResult(..)
   , createReview
   ) where
 
@@ -224,29 +224,17 @@ srsStageFromInt 8         = Enlightened
 srsStageFromInt _         = Burned
 
 data Assignment = Assignment
-  { asId           :: AssignmentId
-  , asSubjectId    :: SubjectId
-  , asSrsStage     :: SrsStage
-  , asSrsStageNum  :: Int
+  { asId        :: AssignmentId
+  , asSubjectId :: SubjectId
+  , asSrsStage  :: SrsStage
   } deriving (Show, Eq)
-
--- | Compute the SRS stage category after a review.
--- wrongTotal is the sum of wrong meaning and wrong reading counts.
--- Correct (wrongTotal == 0): advance by 1. Incorrect: penalise by
--- ceil(wrongTotal / 2), minimum 1 stage drop, floor at Apprentice I (1).
-nextSrsStage :: Assignment -> Int -> SrsStage
-nextSrsStage asg wrongTotal =
-  let cur = asSrsStageNum asg
-      next | wrongTotal == 0 = min 9 (cur + 1)
-           | otherwise       = max 1 (cur - max 1 ((wrongTotal + 1) `div` 2))
-  in srsStageFromInt next
 
 newtype AssignmentsEnvelope = AssignmentsEnvelope { aeData :: [AssignmentData] } deriving (Show)
 
 data AssignmentData = AssignmentData
-  { adId        :: AssignmentId
-  , adSubject   :: SubjectId
-  , adSrsStage  :: Int
+  { adId       :: AssignmentId
+  , adSubject  :: SubjectId
+  , adSrsStage :: Int
   } deriving (Show)
 
 instance FromJSON AssignmentsEnvelope where
@@ -263,7 +251,7 @@ instance FromJSON AssignmentData where
 
 toAssignment :: AssignmentData -> Assignment
 toAssignment (AssignmentData i s stage) =
-  Assignment i s (srsStageFromInt stage) stage
+  Assignment i s (srsStageFromInt stage)
 
 getAvailableAssignments :: String -> UTCTime -> Int -> IO [Assignment]
 getAvailableAssignments token now n = runReq defaultHttpConfig $ do
@@ -413,7 +401,22 @@ chunkN n0 = go
       let (a, b) = splitAt n xs
       in a : go b
 
-createReview :: String -> AssignmentId -> Int -> Int -> UTCTime -> IO ()
+-- | Outcome of a review POST as reported by WaniKani. We trust their
+-- ending_srs_stage rather than computing it locally so the displayed
+-- result can never drift from what is actually persisted.
+data ReviewResult = ReviewResult
+  { rrEndingSrsStage    :: SrsStage
+  , rrEndingSrsStageNum :: Int
+  } deriving (Show, Eq)
+
+newtype ReviewEnvelope = ReviewEnvelope { reEnding :: Int } deriving (Show)
+
+instance FromJSON ReviewEnvelope where
+  parseJSON = withObject "ReviewEnvelope" $ \o -> do
+    d <- o .: "data"
+    ReviewEnvelope <$> d .: "ending_srs_stage"
+
+createReview :: String -> AssignmentId -> Int -> Int -> UTCTime -> IO ReviewResult
 createReview token assignmentId wrongMeaning wrongReading createdAt =
   runReq defaultHttpConfig $ do
     let body =
@@ -426,11 +429,15 @@ createReview token assignmentId wrongMeaning wrongReading createdAt =
                 ]
             ]
 
-    _ <- req
+    resp <- req
       POST
       (https "api.wanikani.com" /: "v2" /: "reviews")
       (ReqBodyJson body)
-      ignoreResponse
+      jsonResponse
       (apiOpts token)
 
-    pure ()
+    let endingNum = reEnding (responseBody resp :: ReviewEnvelope)
+    pure ReviewResult
+      { rrEndingSrsStage    = srsStageFromInt endingNum
+      , rrEndingSrsStageNum = endingNum
+      }

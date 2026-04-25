@@ -299,7 +299,7 @@ spec = do
       Tui.pMeaningWrong result `shouldBe` 2
 
   describe "mkSubmissions" $ do
-    let mkAsg s a = Api.Assignment { Api.asId = a, Api.asSubjectId = s, Api.asSrsStage = Api.Apprentice, Api.asSrsStageNum = 3 }
+    let mkAsg s a = Api.Assignment { Api.asId = a, Api.asSubjectId = s, Api.asSrsStage = Api.Apprentice }
         subjToAsg = M.fromList [(sid 1, mkAsg (sid 1) (aid 101)), (sid 3, mkAsg (sid 3) (aid 303))]
 
     it "produces one submission per subject with an assignment" $ do
