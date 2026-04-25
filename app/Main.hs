@@ -144,7 +144,7 @@ main = do
 
       runBatch
 
-fmtSub :: M.Map Int (Api.Subject, Api.Assignment) -> Tui.Submission -> String
+fmtSub :: M.Map Api.AssignmentId (Api.Subject, Api.Assignment) -> Tui.Submission -> String
 fmtSub asgToInfo s =
   let wrongTotal = Tui.subWrongMeaning s + Tui.subWrongReading s
       (name, stageSuffix) =

@@ -1,7 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Api
-  ( User(..)
+  ( SubjectId(..)
+  , AssignmentId(..)
+
+  , User(..)
   , UserEnvelope(..)
   , getUser
 
@@ -38,6 +41,25 @@ import Data.Time.Format.ISO8601 (iso8601ParseM, iso8601Show)
 
 import qualified Data.ByteString.Char8 as BS8
 import Network.HTTP.Req
+
+--------------------------------------------------------------------------------
+-- IDs
+--------------------------------------------------------------------------------
+
+-- | WaniKani subject ID (radical, kanji, vocabulary, kana_vocabulary).
+newtype SubjectId = SubjectId { unSubjectId :: Int }
+  deriving (Eq, Ord)
+
+-- | WaniKani assignment ID. Distinct from SubjectId so the type checker
+-- catches accidental swaps when threading IDs through maps and API calls.
+newtype AssignmentId = AssignmentId { unAssignmentId :: Int }
+  deriving (Eq, Ord)
+
+instance Show SubjectId    where show (SubjectId i)    = show i
+instance Show AssignmentId where show (AssignmentId i) = show i
+
+instance FromJSON SubjectId    where parseJSON v = SubjectId    <$> parseJSON v
+instance FromJSON AssignmentId where parseJSON v = AssignmentId <$> parseJSON v
 
 --------------------------------------------------------------------------------
 -- Shared API options
@@ -95,7 +117,7 @@ data Summary = Summary
 
 data ReviewBucket = ReviewBucket
   { rbAvailableAt :: UTCTime
-  , rbSubjectIds  :: [Int]
+  , rbSubjectIds  :: [SubjectId]
   } deriving (Show, Eq)
 
 newtype SummaryEnvelope = SummaryEnvelope { seData :: Summary } deriving (Show)
@@ -202,8 +224,8 @@ srsStageFromInt 8         = Enlightened
 srsStageFromInt _         = Burned
 
 data Assignment = Assignment
-  { asId           :: Int
-  , asSubjectId    :: Int
+  { asId           :: AssignmentId
+  , asSubjectId    :: SubjectId
   , asSrsStage     :: SrsStage
   , asSrsStageNum  :: Int
   } deriving (Show, Eq)
@@ -222,8 +244,8 @@ nextSrsStage asg wrongTotal =
 newtype AssignmentsEnvelope = AssignmentsEnvelope { aeData :: [AssignmentData] } deriving (Show)
 
 data AssignmentData = AssignmentData
-  { adId        :: Int
-  , adSubject   :: Int
+  { adId        :: AssignmentId
+  , adSubject   :: SubjectId
   , adSrsStage  :: Int
   } deriving (Show)
 
@@ -269,7 +291,7 @@ data SubjectType = Radical | Kanji | Vocabulary | KanaVocabulary
   deriving (Show, Eq)
 
 data Subject = Subject
-  { subjId               :: Int
+  { subjId               :: SubjectId
   , subjType             :: SubjectType
   , subjLevel            :: Int
   , subjChars            :: Maybe Text
@@ -278,8 +300,8 @@ data Subject = Subject
   , subjAudioUrls        :: [Text]       -- pronunciation audio URLs (vocab only)
   , subjMeaningMnemonic  :: Maybe Text
   , subjReadingMnemonic  :: Maybe Text
-  , subjComponentIds     :: [Int]        -- radicals for kanji; kanji for vocab
-  , subjAmalgamationIds  :: [Int]        -- vocab for kanji; kanji for radical
+  , subjComponentIds     :: [SubjectId]  -- radicals for kanji; kanji for vocab
+  , subjAmalgamationIds  :: [SubjectId]  -- vocab for kanji; kanji for radical
   } deriving (Show, Eq)
 
 newtype SubjectsEnvelope = SubjectsEnvelope { suData :: [Subject] } deriving (Show)
@@ -363,14 +385,14 @@ acceptedFrom field o = do
 
 
 -- Fetch subjects by IDs; chunk to avoid huge URLs.
-getSubjectsByIds :: String -> [Int] -> IO [Subject]
+getSubjectsByIds :: String -> [SubjectId] -> IO [Subject]
 getSubjectsByIds token ids = do
   let chunks = chunkN 100 ids
   fmap concat $ mapM (getChunk token) chunks
 
-getChunk :: String -> [Int] -> IO [Subject]
+getChunk :: String -> [SubjectId] -> IO [Subject]
 getChunk token idsChunk = runReq defaultHttpConfig $ do
-  let idsParam = T.intercalate "," (map (T.pack . show) idsChunk)
+  let idsParam = T.intercalate "," (map (T.pack . show . unSubjectId) idsChunk)
 
   resp <- req
     GET
@@ -391,13 +413,13 @@ chunkN n0 = go
       let (a, b) = splitAt n xs
       in a : go b
 
-createReview :: String -> Int -> Int -> Int -> UTCTime -> IO ()
+createReview :: String -> AssignmentId -> Int -> Int -> UTCTime -> IO ()
 createReview token assignmentId wrongMeaning wrongReading createdAt =
   runReq defaultHttpConfig $ do
     let body =
           object
             [ "review" .= object
-                [ "assignment_id"             .= assignmentId
+                [ "assignment_id"             .= unAssignmentId assignmentId
                 , "incorrect_meaning_answers" .= wrongMeaning
                 , "incorrect_reading_answers" .= wrongReading
                 , "created_at"                .= iso8601Show createdAt

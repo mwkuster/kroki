@@ -191,7 +191,7 @@ apiSpec = describe "Api JSON parsing" $ do
         validJson = "{\"available_at\":\"2024-01-01T00:00:00.000000Z\",\"subject_ids\":[1,2,3]}"
 
     it "parses subject_ids" $
-      fmap Api.rbSubjectIds (decode validJson) `shouldBe` Just [1, 2, 3]
+      fmap Api.rbSubjectIds (decode validJson) `shouldBe` Just (map Api.SubjectId [1, 2, 3])
 
     it "fails on invalid available_at" $
       (decode "{\"available_at\":\"not-a-date\",\"subject_ids\":[]}" :: Maybe Api.ReviewBucket)

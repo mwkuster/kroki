@@ -34,6 +34,7 @@ import qualified Brick.Widgets.List as L
 import qualified Graphics.Vty as V
 import qualified Graphics.Vty.CrossPlatform as VCP
 
+import Control.Exception (SomeException, displayException, try)
 import Control.Monad (void)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Map.Strict as M
@@ -61,7 +62,7 @@ data Q = Q
   } deriving (Show, Eq)
 
 data Submission = Submission
-  { subAssignmentId :: Int
+  { subAssignmentId :: Api.AssignmentId
   , subWrongMeaning :: Int
   , subWrongReading :: Int
   } deriving (Show, Eq)
@@ -102,20 +103,21 @@ data AppState = AppState
   { stQueue        :: [Q]
   , stQueueWidget  :: L.List Name Q
   , stInput        :: Text
-  , stProgress     :: M.Map Int Progress
-  , stSubjToAsg    :: M.Map Int Api.Assignment
+  , stProgress     :: M.Map Api.SubjectId Progress
+  , stSubjToAsg    :: M.Map Api.SubjectId Api.Assignment
   , stRequeueAfter :: Int
   , stCorrect      :: Int
   , stWrong        :: Int
   , stOverridden   :: Int
   , stMode         :: Mode
   , stBanner       :: Maybe Text
+  , stError        :: Maybe Text                       -- transient error message (network etc.)
   , stHasMore      :: Bool
   , stWantsMore    :: Bool
-  , stAudioPlayer   :: Maybe String          -- command to play audio (e.g. "mpv --really-quiet")
-  , stSubmitDetails :: [String]              -- per-submission lines shown after submit
-  , stOverlay       :: Overlay               -- active info overlay
-  , stAllSubjects   :: M.Map Int Api.Subject -- full subject map incl. components
+  , stAudioPlayer   :: Maybe String                    -- command to play audio (e.g. "mpv --really-quiet")
+  , stSubmitDetails :: [String]                        -- per-submission lines shown after submit
+  , stOverlay       :: Overlay                         -- active info overlay
+  , stAllSubjects   :: M.Map Api.SubjectId Api.Subject -- full subject map incl. components
   , stUser          :: Api.User
   , stSummary       :: Api.Summary
   , stNow           :: UTCTime
@@ -126,7 +128,7 @@ data AppState = AppState
 -- Entry point
 --------------------------------------------------------------------------------
 
-runStudyTui :: Int -> Maybe String -> Api.User -> Api.Summary -> UTCTime -> TimeZone -> M.Map Int Api.Subject -> M.Map Int Api.Assignment -> [Api.Subject] -> IO (UTCTime, Api.Summary) -> ([Submission] -> IO SubmitResult) -> IO Bool
+runStudyTui :: Int -> Maybe String -> Api.User -> Api.Summary -> UTCTime -> TimeZone -> M.Map Api.SubjectId Api.Subject -> M.Map Api.SubjectId Api.Assignment -> [Api.Subject] -> IO (UTCTime, Api.Summary) -> ([Submission] -> IO SubmitResult) -> IO Bool
 runStudyTui rqAfter audioPlayer user summary now tz allSubjects subjToAsg subjects refreshFn submitFn = do
   let queue0 = concatMap mkQuestions subjects
       prog0  = M.fromList [ (Api.subjId s, initProgress s) | s <- subjects ]
@@ -145,6 +147,7 @@ runStudyTui rqAfter audioPlayer user summary now tz allSubjects subjToAsg subjec
         , stOverridden   = 0
         , stMode          = Normal
         , stBanner        = Nothing
+        , stError         = Nothing
         , stHasMore       = False
         , stWantsMore     = False
         , stAudioPlayer   = audioPlayer
@@ -241,6 +244,10 @@ drawMain st
                   case stBanner st of
                     Just msg -> [padTop (Pad 1) (txt msg)]
                     Nothing  -> []
+                errorWidgets =
+                  case stError st of
+                    Just msg -> [padTop (Pad 1) (withAttr (attrName "bad") (txtWrap msg))]
+                    Nothing  -> []
                 hintLine =
                   case stMode st of
                     ConfirmSubmit ->
@@ -260,13 +267,14 @@ drawMain st
                 ++ confirmWidgets
                 ++ detailWidgets
                 ++ bannerWidgets
+                ++ errorWidgets
                 ++ [ padTop (Pad 1) hintLine ]
                  )
 
     Just q ->
       B.borderWithLabel (str ("Current" <> srsIndicator q st)) $
         padAll 1 $
-          vBox
+          vBox $
             [ withAttr (attrName "header") $
                 txt (T.pack (displayItem (qSubject q) <> " — " <> kindLabel (qKind q)))
             , padTop (Pad 1) $
@@ -275,7 +283,16 @@ drawMain st
                     txt (displayInput (qKind q) (stInput st))
             , padTop (Pad 1) $
                 drawMode st q
-            , padTop (Pad 1) $
+            ]
+            ++ ( case stError st of
+                   Just msg ->
+                     [ padTop (Pad 1)
+                         (withAttr (attrName "bad") (txtWrap msg))
+                     ]
+                   Nothing -> []
+               )
+            ++
+            [ padTop (Pad 1) $
                 withAttr (attrName "hint") $
                   normalHintWidget q st
             ]
@@ -464,6 +481,31 @@ handleEvent refreshFn submitFn (VtyEvent ev) = do
       _               -> handleNormal refreshFn ev
 handleEvent _ _ _ = pure ()
 
+-- | Refresh summary and open the review-schedule overlay. On network error,
+-- leave the overlay closed and surface the error in stError instead of
+-- letting the exception bubble out and crash the TUI.
+openReviewSchedule :: IO (UTCTime, Api.Summary) -> EventM Name AppState ()
+openReviewSchedule refreshFn = do
+  result <- liftIO (try refreshFn)
+  case result of
+    Right (now', summary') ->
+      modify $ \st -> st
+        { stOverlay = ReviewSchedule
+        , stNow     = now'
+        , stSummary = summary'
+        , stError   = Nothing
+        }
+    Left (e :: SomeException) ->
+      modify $ \st -> st
+        { stError = Just (T.pack ("review schedule unavailable: " <> shortErr e)) }
+
+-- | Truncate exception text so a long backtrace doesn't blow up the layout.
+shortErr :: SomeException -> String
+shortErr e =
+  let msg = displayException e
+      oneLine = takeWhile (/= '\n') msg
+  in if length oneLine > 200 then take 197 oneLine <> "..." else oneLine
+
 handleOverlay :: V.Event -> EventM Name AppState ()
 handleOverlay ev =
   case ev of
@@ -512,9 +554,7 @@ handleWrongAnswer refreshFn ev =
       modify $ \st -> st { stOverlay = AllInfo }
     V.EvKey (V.KChar 'u') [V.MCtrl] ->
       modify $ \st -> st { stOverlay = UserInfo }
-    V.EvKey (V.KChar 'v') [V.MCtrl] -> do
-      (now', summary') <- liftIO refreshFn
-      modify $ \st -> st { stOverlay = ReviewSchedule, stNow = now', stSummary = summary' }
+    V.EvKey (V.KChar 'v') [V.MCtrl] -> openReviewSchedule refreshFn
 
     V.EvKey V.KEnter [] -> do
       st <- get
@@ -545,13 +585,21 @@ handleConfirm submitFn ev =
   where
     doSubmit = do
       st <- get
-      result <- liftIO (submitFn (mkSubmissions st))
-      put st
-        { stMode          = Finished
-        , stBanner        = Just (T.pack (srMessage result))
-        , stHasMore       = srHasMore result
-        , stSubmitDetails = srDetails result
-        }
+      result <- liftIO (try (submitFn (mkSubmissions st)))
+      case result of
+        Right r ->
+          put st
+            { stMode          = Finished
+            , stBanner        = Just (T.pack (srMessage r))
+            , stError         = Nothing
+            , stHasMore       = srHasMore r
+            , stSubmitDetails = srDetails r
+            }
+        Left (e :: SomeException) ->
+          put st
+            { stMode  = Finished
+            , stError = Just (T.pack ("submit failed: " <> shortErr e))
+            }
 
 handleFinished :: IO (UTCTime, Api.Summary) -> V.Event -> EventM Name AppState ()
 handleFinished refreshFn ev =
@@ -560,9 +608,7 @@ handleFinished refreshFn ev =
     V.EvKey V.KEsc []               -> halt
     V.EvKey (V.KChar 'u') [V.MCtrl] ->
       modify $ \st -> st { stOverlay = UserInfo }
-    V.EvKey (V.KChar 'v') [V.MCtrl] -> do
-      (now', summary') <- liftIO refreshFn
-      modify $ \st -> st { stOverlay = ReviewSchedule, stNow = now', stSummary = summary' }
+    V.EvKey (V.KChar 'v') [V.MCtrl] -> openReviewSchedule refreshFn
     V.EvKey (V.KChar 's') [V.MCtrl] -> do
       st <- get
       case stBanner st of
@@ -607,9 +653,7 @@ handleNormal refreshFn ev =
       modify $ \st -> st { stOverlay = AllInfo }
     V.EvKey (V.KChar 'u') [V.MCtrl] ->
       modify $ \st -> st { stOverlay = UserInfo }
-    V.EvKey (V.KChar 'v') [V.MCtrl] -> do
-      (now', summary') <- liftIO refreshFn
-      modify $ \st -> st { stOverlay = ReviewSchedule, stNow = now', stSummary = summary' }
+    V.EvKey (V.KChar 'v') [V.MCtrl] -> openReviewSchedule refreshFn
 
     V.EvKey V.KEsc [] ->
       halt
@@ -641,6 +685,7 @@ handleNormal refreshFn ev =
       put st
         { stInput = stInput st <> T.singleton c
         , stMode  = Normal
+        , stError = Nothing
         }
 
     _ -> pure ()
@@ -730,7 +775,7 @@ mkQueueWidget qs =
 -- Progress / submissions
 --------------------------------------------------------------------------------
 
-markOk :: Api.Subject -> QKind -> M.Map Int Progress -> M.Map Int Progress
+markOk :: Api.Subject -> QKind -> M.Map Api.SubjectId Progress -> M.Map Api.SubjectId Progress
 markOk subj kind mp =
   let sid = Api.subjId subj
   in M.adjust upd sid mp
@@ -740,7 +785,7 @@ markOk subj kind mp =
         QMeaning -> p { pMeaningOk = True }
         QReading -> p { pReadingOk = True }
 
-incWrong :: Api.Subject -> QKind -> M.Map Int Progress -> M.Map Int Progress
+incWrong :: Api.Subject -> QKind -> M.Map Api.SubjectId Progress -> M.Map Api.SubjectId Progress
 incWrong subj kind mp =
   let sid = Api.subjId subj
   in M.adjust upd sid mp
