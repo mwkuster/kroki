@@ -22,7 +22,7 @@ A minimal terminal client for [WaniKani](https://www.wanikani.com/) — do your 
 - Current SRS stage (Apprentice / Guru / Master / Enlightened / Burned) shown in the question border
 - Romaji input converted to hiragana live as you type (`gakkou` → `がっこう`)
 - British/American spelling normalisation for meaning answers
-- Per-item level, SRS stage, mnemonics, and component breakdowns (Ctrl-a)
+- Per-item level, SRS stage, mnemonics, and component breakdowns (Ctrl-a) — kanji info lists vocabulary that uses the kanji; vocabulary info shows the readings of each component kanji
 - Review schedule for the next 24 hours (Ctrl-v)
 - Optional pronunciation audio via an external player (Ctrl-p)
 - Submits results back to WaniKani at the end of each batch; post-submit list shows the resulting SRS stage per item
