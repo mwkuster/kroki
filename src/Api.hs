@@ -279,6 +279,7 @@ data Subject = Subject
   , subjMeaningMnemonic  :: Maybe Text
   , subjReadingMnemonic  :: Maybe Text
   , subjComponentIds     :: [Int]        -- radicals for kanji; kanji for vocab
+  , subjAmalgamationIds  :: [Int]        -- vocab for kanji; kanji for radical
   } deriving (Show, Eq)
 
 newtype SubjectsEnvelope = SubjectsEnvelope { suData :: [Subject] } deriving (Show)
@@ -320,6 +321,7 @@ instance FromJSON Subject where
     compIds <- case st of
       Radical -> pure []
       _       -> fromMaybe [] <$> (d .:? "component_subject_ids")
+    amalgIds <- fromMaybe [] <$> (d .:? "amalgamation_subject_ids")
 
     pure Subject
       { subjId              = sid
@@ -332,6 +334,7 @@ instance FromJSON Subject where
       , subjMeaningMnemonic = mmnem
       , subjReadingMnemonic = rmnem
       , subjComponentIds    = compIds
+      , subjAmalgamationIds = amalgIds
       }
 
 parseSubjectType :: Text -> Parser SubjectType

@@ -96,7 +96,17 @@ main = do
                 subjects <- Api.getSubjectsByIds t subjectIds
                 let compIds = nub [ cid | s <- subjects, cid <- Api.subjComponentIds s ]
                 compSubjects <- Api.getSubjectsByIds t compIds
-                let allSubjMap = M.fromList [ (Api.subjId s, s) | s <- subjects ++ compSubjects ]
+                let amalgIds = nub
+                      [ aid
+                      | s <- subjects
+                      , Api.subjType s == Api.Kanji
+                      , aid <- Api.subjAmalgamationIds s
+                      ]
+                amalgSubjects <- Api.getSubjectsByIds t amalgIds
+                let allSubjMap = M.fromList
+                      [ (Api.subjId s, s)
+                      | s <- subjects ++ compSubjects ++ amalgSubjects
+                      ]
                     asgToInfo  = M.fromList
                       [ (Api.asId asg, (subj, asg))
                       | subj <- subjects

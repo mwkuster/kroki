@@ -322,6 +322,7 @@ drawAllInfo q st =
         vBox $
              assignSection
           ++ compSection
+          ++ amalgSection
           ++ [ str ("Meanings:  " <> T.unpack (T.intercalate ", " (Api.subjMeanings subj))) ]
           ++ readSection
           ++ mnSection "Meaning mnemonic" (Api.subjMeaningMnemonic subj)
@@ -342,15 +343,49 @@ drawAllInfo q st =
          , str ""
          ]
 
+    showKanjiReadings c =
+      Api.subjType c == Api.Kanji
+      && (Api.subjType subj == Api.Vocabulary || Api.subjType subj == Api.KanaVocabulary)
+      && not (null (Api.subjReadings c))
+
+    renderComponent c =
+      let chars   = T.unpack (fromMaybe "?" (Api.subjChars c))
+          meanings = T.unpack (T.intercalate ", " (Api.subjMeanings c))
+          headerW  = str ("  " <> chars <> "  " <> meanings)
+      in if showKanjiReadings c
+           then [ headerW
+                , withAttr (attrName "hint") $
+                    str ("       readings: "
+                      <> T.unpack (T.intercalate ", " (Api.subjReadings c)))
+                ]
+           else [ headerW ]
+
     compSection =
       let comps = mapMaybe (\cid -> M.lookup cid (stAllSubjects st))
                                       (Api.subjComponentIds subj)
       in case comps of
            [] -> []
-           cs -> str "Components:"
-               : map (\c -> str ("  " <> T.unpack (fromMaybe "?" (Api.subjChars c))
-                              <> "  " <> T.unpack (T.intercalate ", " (Api.subjMeanings c)))) cs
-              ++ [str ""]
+           cs -> str "Components:" : concatMap renderComponent cs ++ [str ""]
+
+    renderAmalgamation v =
+      let chars   = T.unpack (fromMaybe "?" (Api.subjChars v))
+          meaning = case Api.subjMeanings v of
+                      (m:_) -> T.unpack m
+                      []    -> "?"
+          rd      = case Api.subjReadings v of
+                      (r:_) -> " (" <> T.unpack r <> ")"
+                      []    -> ""
+      in str ("  " <> chars <> rd <> "  " <> meaning)
+
+    amalgSection =
+      case Api.subjType subj of
+        Api.Kanji ->
+          let vocabs = mapMaybe (\aid -> M.lookup aid (stAllSubjects st))
+                                          (Api.subjAmalgamationIds subj)
+          in case vocabs of
+               [] -> []
+               vs -> str "Vocabulary:" : map renderAmalgamation vs ++ [str ""]
+        _ -> []
 
     readSection =
       case Api.subjReadings subj of

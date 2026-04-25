@@ -29,6 +29,7 @@ kanjiSubj = Api.Subject
   , Api.subjMeaningMnemonic = Nothing
   , Api.subjReadingMnemonic = Nothing
   , Api.subjComponentIds    = []
+  , Api.subjAmalgamationIds = []
   }
 
 -- Radical (no reading question)
@@ -44,6 +45,7 @@ radicalSubj = Api.Subject
   , Api.subjMeaningMnemonic = Nothing
   , Api.subjReadingMnemonic = Nothing
   , Api.subjComponentIds    = []
+  , Api.subjAmalgamationIds = []
   }
 
 -- Vocab subject
@@ -59,6 +61,7 @@ vocabSubj = Api.Subject
   , Api.subjMeaningMnemonic = Nothing
   , Api.subjReadingMnemonic = Nothing
   , Api.subjComponentIds    = []
+  , Api.subjAmalgamationIds = []
   }
 
 mkQ :: Api.Subject -> Tui.QKind -> Tui.Q
