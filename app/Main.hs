@@ -7,6 +7,7 @@ import qualified Tui
 import Util (strPadLeft, strPadRight)
 
 import Control.Applicative ((<|>))
+import Control.Concurrent.Async (mapConcurrently)
 import Control.Exception (SomeException, displayException, try)
 import System.Environment (lookupEnv)
 import System.Exit (die)
@@ -123,7 +124,7 @@ main = do
 
           submitBatch asgToInfo subs = do
             ts <- getCurrentTime
-            outcomes <- mapM (postReview ts) subs
+            outcomes <- mapConcurrently (postReview ts) subs
             now2     <- getCurrentTime
             summary2 <- Api.getSummary t
             as2      <- Api.getAvailableAssignments t now2 n
