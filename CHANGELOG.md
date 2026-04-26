@@ -1,5 +1,11 @@
 # Revision history for kroki
 
+## 0.9.4 -- 2026-04-26
+
+* TUI no longer freezes during review submission: POSTs run on a background thread, with a "Submitting…" banner and input blocked until the result arrives
+* Submissions run in parallel (capped at 50 in-flight) to keep wall-time short on large batches without breaching WaniKani's 60 req/min limit
+* Refactor: `src/Tui.hs` split into `Tui.State`, `Tui.Draw`, and `Tui.Event` submodules behind a thin facade
+
 ## 0.9.3 -- 2026-04-25
 
 * All-info overlay (Ctrl-a): kanji subjects now list the vocabulary that uses them; vocabulary subjects show the accepted readings of each component kanji
