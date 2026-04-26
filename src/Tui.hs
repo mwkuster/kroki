@@ -13,6 +13,7 @@ import Tui.Draw (drawUi, theMap)
 import Tui.Event (handleEvent, shuffle)
 
 import Brick
+import Brick.BChan (newBChan)
 import qualified Graphics.Vty as V
 import qualified Graphics.Vty.CrossPlatform as VCP
 
@@ -27,6 +28,7 @@ runStudyTui rqAfter audioPlayer user summary now tz allSubjects subjToAsg subjec
       prog0  = M.fromList [ (Api.subjId s, initProgress s) | s <- subjects ]
 
   queue <- shuffle queue0
+  chan  <- newBChan 10
 
   let st0 = AppState
         { stQueue        = queue
@@ -51,14 +53,15 @@ runStudyTui rqAfter audioPlayer user summary now tz allSubjects subjToAsg subjec
         , stSummary       = summary
         , stNow           = now
         , stTZ            = tz
+        , stSubmitChan    = chan
         }
 
   let buildVty = VCP.mkVty V.defaultConfig
   initialVty <- buildVty
-  finalState <- customMain initialVty buildVty Nothing (app refreshFn submitFn) st0
+  finalState <- customMain initialVty buildVty (Just chan) (app refreshFn submitFn) st0
   pure (stWantsMore finalState)
 
-app :: IO (UTCTime, Api.Summary) -> ([Submission] -> IO SubmitResult) -> App AppState e Name
+app :: IO (UTCTime, Api.Summary) -> ([Submission] -> IO SubmitResult) -> App AppState AppEvent Name
 app refreshFn submitFn = App
   { appDraw         = drawUi
   , appChooseCursor = neverShowCursor

@@ -9,6 +9,7 @@ module Tui.State
   , Q(..)
   , Submission(..)
   , SubmitResult(..)
+  , AppEvent(..)
   , Progress(..)
   , AppState(..)
 
@@ -46,7 +47,9 @@ module Tui.State
 import qualified Api
 import qualified Romaji
 
+import Brick.BChan (BChan)
 import qualified Brick.Widgets.List as L
+import Control.Exception (SomeException)
 import qualified Data.Map.Strict as M
 import qualified Data.Vector as Vec
 import Data.Maybe (isJust)
@@ -102,8 +105,12 @@ data Mode
   | WrongAnswer Text [String]  -- user's input, accepted answers
   | Feedback Text
   | ConfirmSubmit
+  | Submitting                 -- background submission in flight; input blocked
   | Finished
   deriving (Show, Eq)
+
+-- | Custom Brick event injected from background threads.
+data AppEvent = SubmitDone (Either SomeException SubmitResult)
 
 data AppState = AppState
   { stQueue        :: [Q]
@@ -128,6 +135,7 @@ data AppState = AppState
   , stSummary       :: Api.Summary
   , stNow           :: UTCTime
   , stTZ            :: TimeZone
+  , stSubmitChan    :: BChan AppEvent                  -- background submission notifications
   }
 
 --------------------------------------------------------------------------------

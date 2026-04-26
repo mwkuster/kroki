@@ -93,6 +93,8 @@ drawMain st
                   case stMode st of
                     ConfirmSubmit ->
                       hintBox ["y/Enter=confirm", "n/Esc=cancel"]
+                    Submitting ->
+                      hintBox ["please wait…"]
                     _ | Just _ <- stBanner st ->
                           hintBox $ ["Esc=quit", "Ctrl-u=user", "Ctrl-v=reviews"] ++
                             [ "Ctrl-n=next batch" | stHasMore st ] ++

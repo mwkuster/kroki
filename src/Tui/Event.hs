@@ -10,8 +10,10 @@ import qualified Api
 import Tui.State
 
 import Brick
+import Brick.BChan (writeBChan)
 import qualified Graphics.Vty as V
 
+import Control.Concurrent (forkIO)
 import Control.Exception (SomeException, displayException, try)
 import Control.Monad (void)
 import Control.Monad.IO.Class (liftIO)
@@ -20,7 +22,21 @@ import qualified Data.Text as T
 import System.Process (spawnProcess)
 import System.Random (randomRIO)
 
-handleEvent :: IO (UTCTime, Api.Summary) -> ([Submission] -> IO SubmitResult) -> BrickEvent Name e -> EventM Name AppState ()
+handleEvent :: IO (UTCTime, Api.Summary) -> ([Submission] -> IO SubmitResult) -> BrickEvent Name AppEvent -> EventM Name AppState ()
+handleEvent _ _ (AppEvent (SubmitDone result)) =
+  modify $ \st -> case result of
+    Right r -> st
+      { stMode          = Finished
+      , stBanner        = Just (T.pack (srMessage r))
+      , stError         = Nothing
+      , stHasMore       = srHasMore r
+      , stSubmitDetails = srDetails r
+      }
+    Left e -> st
+      { stMode  = Finished
+      , stBanner = Nothing
+      , stError = Just (T.pack ("submit failed: " <> shortErr e))
+      }
 handleEvent refreshFn submitFn (VtyEvent ev) = do
   st <- get
   if stOverlay st /= NoOverlay
@@ -28,6 +44,7 @@ handleEvent refreshFn submitFn (VtyEvent ev) = do
     else case stMode st of
       WrongAnswer _ _ -> handleWrongAnswer refreshFn ev
       ConfirmSubmit   -> handleConfirm submitFn ev
+      Submitting      -> pure ()                           -- swallow all input
       Finished        -> handleFinished refreshFn ev
       _               -> handleNormal refreshFn ev
 handleEvent _ _ _ = pure ()
@@ -136,21 +153,16 @@ handleConfirm submitFn ev =
   where
     doSubmit = do
       st <- get
-      result <- liftIO (try (submitFn (mkSubmissions st)))
-      case result of
-        Right r ->
-          put st
-            { stMode          = Finished
-            , stBanner        = Just (T.pack (srMessage r))
-            , stError         = Nothing
-            , stHasMore       = srHasMore r
-            , stSubmitDetails = srDetails r
-            }
-        Left (e :: SomeException) ->
-          put st
-            { stMode  = Finished
-            , stError = Just (T.pack ("submit failed: " <> shortErr e))
-            }
+      let chan = stSubmitChan st
+          subs = mkSubmissions st
+      put st
+        { stMode   = Submitting
+        , stBanner = Just "Submitting to WaniKani…"
+        , stError  = Nothing
+        }
+      void $ liftIO $ forkIO $ do
+        r <- try (submitFn subs)
+        writeBChan chan (SubmitDone r)
 
 handleFinished :: IO (UTCTime, Api.Summary) -> V.Event -> EventM Name AppState ()
 handleFinished refreshFn ev =
