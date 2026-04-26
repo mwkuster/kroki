@@ -8,7 +8,8 @@ import Util (strPadLeft, strPadRight)
 
 import Control.Applicative ((<|>))
 import Control.Concurrent.Async (mapConcurrently)
-import Control.Exception (SomeException, displayException, try)
+import Control.Concurrent.QSem (newQSem, signalQSem, waitQSem)
+import Control.Exception (SomeException, bracket_, displayException, try)
 import System.Environment (lookupEnv)
 import System.Exit (die)
 
@@ -124,7 +125,7 @@ main = do
 
           submitBatch asgToInfo subs = do
             ts <- getCurrentTime
-            outcomes <- mapConcurrently (postReview ts) subs
+            outcomes <- mapConcurrentlyN maxParallelSubmits (postReview ts) subs
             now2     <- getCurrentTime
             summary2 <- Api.getSummary t
             as2      <- Api.getAvailableAssignments t now2 n
@@ -189,3 +190,12 @@ subjLabel subj =
                   []    -> "?"
   in if null chars then meaning else chars <> " (" <> meaning <> ")"
 
+-- | Stay well under WaniKani's 60 req/min budget even on big batches.
+maxParallelSubmits :: Int
+maxParallelSubmits = 50
+
+-- | Like 'mapConcurrently', but cap the number of in-flight actions at @n@.
+mapConcurrentlyN :: Int -> (a -> IO b) -> [a] -> IO [b]
+mapConcurrentlyN n f xs = do
+  sem <- newQSem n
+  mapConcurrently (\x -> bracket_ (waitQSem sem) (signalQSem sem) (f x)) xs
