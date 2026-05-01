@@ -152,9 +152,9 @@ drawMode st q =
             QMeaning -> input
       in vBox
         [ withAttr (attrName "bad") $
-            txt ("✗ you entered: " <> shownInput)
+            txtWrap ("✗ you entered: " <> shownInput)
         , withAttr (attrName "ok") $
-            txt ("✓ accepted:    " <> T.pack (intercalate ", " expected))
+            txtWrap ("✓ accepted:    " <> T.pack (intercalate ", " expected))
         ]
 
     Feedback msg ->
