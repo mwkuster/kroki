@@ -81,6 +81,7 @@ handleOverlay ev =
     V.EvKey (V.KChar 'u') [V.MCtrl] -> close
     V.EvKey (V.KChar 'v') [V.MCtrl] -> close
     V.EvKey V.KEsc []                -> close
+    V.EvKey V.KEnter []              -> closeIfAllInfo
     V.EvKey V.KUp []                 -> scroll (-1)
     V.EvKey V.KDown []               -> scroll 1
     V.EvKey (V.KChar 'k') []         -> scroll (-1)
@@ -88,6 +89,11 @@ handleOverlay ev =
     _                                -> pure ()
   where
     close = modify $ \st -> st { stOverlay = NoOverlay }
+    closeIfAllInfo = do
+      st <- get
+      case stOverlay st of
+        AllInfo -> close
+        _       -> pure ()
     scroll n = do
       st <- get
       let vp = case stOverlay st of

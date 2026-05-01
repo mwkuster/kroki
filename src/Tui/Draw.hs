@@ -188,7 +188,7 @@ drawAllInfo q st =
           ++ mnSection "Meaning mnemonic" (Api.subjMeaningMnemonic subj)
           ++ mnSection "Reading mnemonic" (Api.subjReadingMnemonic subj)
           ++ [ padTop (Pad 1) $
-                 hintBox ["Ctrl-a/Esc=close", "↑↓/j/k=scroll"] ]
+                 hintBox ["Ctrl-a/Esc/Enter=close", "↑↓/j/k=scroll"] ]
   where
     subj  = qSubject q
     label = fromMaybe "?" (Api.subjChars subj)
