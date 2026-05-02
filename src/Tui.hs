@@ -54,6 +54,7 @@ runStudyTui rqAfter audioPlayer user summary now tz allSubjects subjToAsg subjec
         , stNow           = now
         , stTZ            = tz
         , stSubmitChan    = chan
+        , stLastCompleted = Nothing
         }
 
   let buildVty = VCP.mkVty V.defaultConfig

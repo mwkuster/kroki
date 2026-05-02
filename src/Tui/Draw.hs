@@ -61,7 +61,7 @@ drawQueueItem _ q =
 drawMain :: AppState -> Widget Name
 drawMain st
   | stOverlay st == AllInfo =
-      case currentQuestion st of
+      case infoQuestion st of
         Just q  -> drawAllInfo q st
         Nothing -> emptyWidget
   | stOverlay st == UserInfo       = drawUserInfo st

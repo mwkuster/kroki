@@ -99,6 +99,7 @@ stateWith prog subjToAsg = Tui.AppState
   , Tui.stNow           = UTCTime (fromGregorian 2024 1 1) (secondsToDiffTime 0)
   , Tui.stTZ            = utc
   , Tui.stSubmitChan    = error "stSubmitChan: not used in pure tests"
+  , Tui.stLastCompleted = Nothing
   }
 
 --------------------------------------------------------------------------------

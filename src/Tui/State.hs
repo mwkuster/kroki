@@ -15,6 +15,7 @@ module Tui.State
 
     -- Session logic
   , currentQuestion
+  , infoQuestion
   , submitAnswer
   , advanceCorrect
   , advanceOverride
@@ -136,6 +137,7 @@ data AppState = AppState
   , stNow           :: UTCTime
   , stTZ            :: TimeZone
   , stSubmitChan    :: BChan AppEvent                  -- background submission notifications
+  , stLastCompleted :: Maybe Q                         -- last question to leave the queue head
   }
 
 --------------------------------------------------------------------------------
@@ -147,6 +149,19 @@ currentQuestion st =
   case stQueue st of
     []    -> Nothing
     (q:_) -> Just q
+
+-- | Question to display in the all-info overlay. In WrongAnswer mode the
+-- user is still acting on the current item, so always show that. Otherwise,
+-- if no input has been typed yet for the next question, prefer the last
+-- completed question so the user can review what they just answered.
+infoQuestion :: AppState -> Maybe Q
+infoQuestion st =
+  case stMode st of
+    WrongAnswer _ _ -> currentQuestion st
+    _ ->
+      case stLastCompleted st of
+        Just q | T.null (stInput st) -> Just q
+        _                            -> currentQuestion st
 
 submitAnswer :: Q -> Text -> AppState -> AppState
 submitAnswer q answer st =
@@ -163,12 +178,13 @@ advanceCorrect q st =
   let prog'  = markOk (qSubject q) (qKind q) (stProgress st)
       queue' = drop 1 (stQueue st)
   in st
-     { stQueue       = queue'
-     , stQueueWidget = mkQueueWidget queue'
-     , stProgress    = prog'
-     , stCorrect     = stCorrect st + 1
-     , stInput       = T.empty
-     , stMode        = if null queue' then Finished else Feedback "✓"
+     { stQueue         = queue'
+     , stQueueWidget   = mkQueueWidget queue'
+     , stProgress      = prog'
+     , stCorrect       = stCorrect st + 1
+     , stInput         = T.empty
+     , stMode          = if null queue' then Finished else Feedback "✓"
+     , stLastCompleted = Just q
      }
 
 advanceOverride :: Q -> AppState -> AppState
@@ -176,13 +192,14 @@ advanceOverride q st =
   let prog'  = markOk (qSubject q) (qKind q) (stProgress st)
       queue' = drop 1 (stQueue st)
   in st
-     { stQueue       = queue'
-     , stQueueWidget = mkQueueWidget queue'
-     , stProgress    = prog'
-     , stCorrect     = stCorrect st + 1
-     , stOverridden  = stOverridden st + 1
-     , stInput       = T.empty
-     , stMode        = if null queue' then Finished else Feedback "override"
+     { stQueue         = queue'
+     , stQueueWidget   = mkQueueWidget queue'
+     , stProgress      = prog'
+     , stCorrect       = stCorrect st + 1
+     , stOverridden    = stOverridden st + 1
+     , stInput         = T.empty
+     , stMode          = if null queue' then Finished else Feedback "override"
+     , stLastCompleted = Just q
      }
 
 requeueWrong :: Q -> AppState -> AppState
@@ -190,12 +207,13 @@ requeueWrong q st =
   let prog'  = incWrong (qSubject q) (qKind q) (stProgress st)
       queue' = requeueAfterK (stRequeueAfter st) q (drop 1 (stQueue st))
   in st
-     { stQueue       = queue'
-     , stQueueWidget = mkQueueWidget queue'
-     , stProgress    = prog'
-     , stWrong       = stWrong st + 1
-     , stInput       = T.empty
-     , stMode        = Feedback "requeued"
+     { stQueue         = queue'
+     , stQueueWidget   = mkQueueWidget queue'
+     , stProgress      = prog'
+     , stWrong         = stWrong st + 1
+     , stInput         = T.empty
+     , stMode          = Feedback "requeued"
+     , stLastCompleted = Just q
      }
 
 -- | Requeue without recording a wrong answer (no penalty to wrong counts).
@@ -203,10 +221,11 @@ requeueOnly :: Q -> AppState -> AppState
 requeueOnly q st =
   let queue' = requeueAfterK (stRequeueAfter st) q (drop 1 (stQueue st))
   in st
-     { stQueue       = queue'
-     , stQueueWidget = mkQueueWidget queue'
-     , stInput       = T.empty
-     , stMode        = Feedback "requeued"
+     { stQueue         = queue'
+     , stQueueWidget   = mkQueueWidget queue'
+     , stInput         = T.empty
+     , stMode          = Feedback "requeued"
+     , stLastCompleted = Just q
      }
 
 requeueAfterK :: Int -> Q -> [Q] -> [Q]
