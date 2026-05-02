@@ -1,5 +1,11 @@
 # Revision history for kroki
 
+## 0.9.5 -- 2026-05-02
+
+* `Enter` now also closes the all-info overlay (Ctrl-a), alongside Ctrl-a and Esc
+* Wrong-answer feedback lines wrap when the list of accepted answers is long
+* Ctrl-a on a fresh question (no input typed yet) now opens the all-info overlay for the just-answered subject, so you can review what you just got right or wrong before starting the next one
+
 ## 0.9.4 -- 2026-04-26
 
 * TUI no longer freezes during review submission: POSTs run on a background thread, with a "Submitting…" banner and input blocked until the result arrives
