@@ -183,6 +183,7 @@ drawAllInfo q st =
              assignSection
           ++ compSection
           ++ amalgSection
+          ++ similarSection
           ++ [ str ("Meanings:  " <> T.unpack (T.intercalate ", " (Api.subjMeanings subj))) ]
           ++ readSection
           ++ mnSection "Meaning mnemonic" (Api.subjMeaningMnemonic subj)
@@ -245,6 +246,16 @@ drawAllInfo q st =
           in case vocabs of
                [] -> []
                vs -> str "Vocabulary:" : map renderAmalgamation vs ++ [str ""]
+        _ -> []
+
+    similarSection =
+      case Api.subjType subj of
+        Api.Kanji ->
+          let sims = mapMaybe (\vid -> M.lookup vid (stAllSubjects st))
+                                       (Api.subjVisuallySimilarIds subj)
+          in case sims of
+               [] -> []
+               vs -> str "Visually similar:" : map renderAmalgamation vs ++ [str ""]
         _ -> []
 
     readSection =

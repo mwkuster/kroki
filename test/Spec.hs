@@ -210,6 +210,7 @@ apiSpec = describe "Api JSON parsing" $ do
           , ",{\"meaning\":\"Day\",\"accepted_answer\":true}],"
           , "\"readings\":[{\"reading\":\"\\u306b\\u3061\",\"accepted_answer\":true}"
           , ",{\"reading\":\"\\u3058\\u3064\",\"accepted_answer\":false}],"
+          , "\"visually_similar_subject_ids\":[440,449],"
           , "\"component_subject_ids\":[]}}"
           ]
 
@@ -218,6 +219,10 @@ apiSpec = describe "Api JSON parsing" $ do
 
     it "parses accepted meanings only" $
       fmap Api.subjMeanings (decode validJson) `shouldBe` Just ["Sun", "Day"]
+
+    it "parses visually similar subject ids" $
+      fmap (map Api.unSubjectId . Api.subjVisuallySimilarIds) (decode validJson)
+        `shouldBe` Just [440, 449]
 
     it "parses accepted readings only" $
       fmap Api.subjReadings (decode validJson) `shouldBe` Just ["\12395\12385"]

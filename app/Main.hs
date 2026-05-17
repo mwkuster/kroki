@@ -106,9 +106,16 @@ main = do
                       , aid <- Api.subjAmalgamationIds s
                       ]
                 amalgSubjects <- Api.getSubjectsByIds t amalgIds
+                let simIds = nub
+                      [ vid
+                      | s <- subjects
+                      , Api.subjType s == Api.Kanji
+                      , vid <- Api.subjVisuallySimilarIds s
+                      ]
+                simSubjects <- Api.getSubjectsByIds t simIds
                 let allSubjMap = M.fromList
                       [ (Api.subjId s, s)
-                      | s <- subjects ++ compSubjects ++ amalgSubjects
+                      | s <- subjects ++ compSubjects ++ amalgSubjects ++ simSubjects
                       ]
                     asgToInfo  = M.fromList
                       [ (Api.asId asg, (subj, asg))
