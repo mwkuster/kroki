@@ -25,7 +25,12 @@ data Options = Options
   } deriving (Show, Eq)
 
 parseCli :: IO Options
-parseCli = execParser parserInfo
+parseCli = customExecParser cliPrefs parserInfo
+
+-- | @helpShowGlobals@ makes @kroki <command> --help@ also list the global
+-- options (e.g. @--token@), so every option a command accepts is shown.
+cliPrefs :: ParserPrefs
+cliPrefs = prefs helpShowGlobals
 
 parserInfo :: ParserInfo Options
 parserInfo =
@@ -62,6 +67,8 @@ requeueAfterOption =
    <> metavar "K"
    <> help "Requeue a missed question K positions later (overrides config requeue_after)" )
 
+-- | @hsubparser@ attaches a @--help@ option to every command, so each
+-- command's options are listed by @kroki <command> --help@.
 commandParser :: Parser Command
 commandParser =
   hsubparser

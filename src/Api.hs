@@ -290,6 +290,7 @@ data Subject = Subject
   , subjReadingMnemonic  :: Maybe Text
   , subjComponentIds     :: [SubjectId]  -- radicals for kanji; kanji for vocab
   , subjAmalgamationIds  :: [SubjectId]  -- vocab for kanji; kanji for radical
+  , subjVisuallySimilarIds :: [SubjectId] -- visually similar kanji (kanji only)
   } deriving (Show, Eq)
 
 newtype SubjectsEnvelope = SubjectsEnvelope { suData :: [Subject] } deriving (Show)
@@ -332,6 +333,9 @@ instance FromJSON Subject where
       Radical -> pure []
       _       -> fromMaybe [] <$> (d .:? "component_subject_ids")
     amalgIds <- fromMaybe [] <$> (d .:? "amalgamation_subject_ids")
+    simIds   <- case st of
+      Kanji -> fromMaybe [] <$> (d .:? "visually_similar_subject_ids")
+      _     -> pure []
 
     pure Subject
       { subjId              = sid
@@ -345,6 +349,7 @@ instance FromJSON Subject where
       , subjReadingMnemonic = rmnem
       , subjComponentIds    = compIds
       , subjAmalgamationIds = amalgIds
+      , subjVisuallySimilarIds = simIds
       }
 
 parseSubjectType :: Text -> Parser SubjectType
