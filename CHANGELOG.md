@@ -1,6 +1,6 @@
 # Revision history for kroki
 
-## Unreleased
+## 0.9.6 -- 2026-05-17
 
 * All-info overlay (Ctrl-a): kanji subjects now list visually similar kanji, with their readings and meanings
 * `kroki <command> --help` now also lists the global `--token` option, so every option a command accepts is shown
